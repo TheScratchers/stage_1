@@ -1,0 +1,68 @@
+# ============================================================
+# .gitignore — Stage 1: Big Data Search Engine
+# ============================================================
+
+# ─── Datalake & Data directories (large runtime data) ───────
+data/datalake/
+data/datamarts/
+
+# ─── Control state files (runtime state, not source) ────────
+control/downloaded_books.txt
+control/indexed_books.txt
+
+# ─── C++ build artifacts ────────────────────────────────────
+c++/build/
+*.o
+*.a
+*.so
+*.out
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# ─── Java build artifacts ───────────────────────────────────
+java/target/
+java/.gradle/
+java/build/
+*.class
+*.jar
+*.war
+*.ear
+.classpath
+.project
+.settings/
+
+# ─── Python artifacts ───────────────────────────────────────
+python/__pycache__/
+python/*.pyc
+python/*.pyo
+python/.venv/
+python/venv/
+python/env/
+*.egg-info/
+dist/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ─── IDEs & Editors ─────────────────────────────────────────
+.idea/
+.vscode/
+*.suo
+*.user
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ─── OS & system files ──────────────────────────────────────
+.DS_Store
+ehthumbs.db
+Desktop.ini
+
+# ─── Logs ───────────────────────────────────────────────────
+*.log
+logs/
