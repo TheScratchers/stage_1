@@ -3,6 +3,7 @@ __pycache__/
 test_output/
 datalake/
 datamarts/*.db
+datamarts/*.json
 data/output/
 venv/
 .venv/
