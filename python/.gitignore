@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 test_output/
 datalake/
+datamarts/*.db
 data/output/
 venv/
 .venv/
