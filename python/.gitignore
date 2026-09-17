@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 test_output/
+datalake/
 data/output/
 venv/
 .venv/
