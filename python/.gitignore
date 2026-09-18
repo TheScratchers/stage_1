@@ -4,6 +4,7 @@ test_output/
 datalake/
 datamarts/*.db
 datamarts/*.json
+control/
 data/output/
 venv/
 .venv/
