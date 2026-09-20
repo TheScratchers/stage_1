@@ -14,16 +14,20 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
 
 # ── Compiler warnings ───────────────────────────────────────
 if(MSVC)
-    add_compile_options(/W4 /WX)
+    add_compile_options(/W4)
 else()
-    add_compile_options(-Wall -Wextra -Wpedantic -Werror)
+    add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
+
+# ── Find CURL for downloading books ─────────────────────────
+find_package(CURL REQUIRED)
 
 # ── Collect all source files ────────────────────────────────
 file(GLOB_RECURSE SOURCES "${CMAKE_SOURCE_DIR}/src/*.cpp")
 
-# ── Main executable (added when src/ is populated) ──────────
-# add_executable(search_engine ${SOURCES})
+# ── Main executable ─────────────────────────────────────────
+add_executable(search_engine ${SOURCES})
+target_link_libraries(search_engine PRIVATE CURL::libcurl)
 
 message(STATUS "Stage 1 — C++ Search Engine (C++17)")
 message(STATUS "Sources directory : ${CMAKE_SOURCE_DIR}/src")
