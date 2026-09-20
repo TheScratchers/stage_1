@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+test_output/
+datalake/
+datamarts/*.db
+datamarts/*.json
+datamarts/inverted_index/
+control/
+data/output/
+venv/
+.venv/
