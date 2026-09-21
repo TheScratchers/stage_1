@@ -29,6 +29,7 @@ java/build/
 *.jar
 *.war
 *.ear
+*.db
 .classpath
 .project
 .settings/
