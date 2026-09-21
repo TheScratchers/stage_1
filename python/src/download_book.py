@@ -16,6 +16,29 @@ START_MARKER = "*** START OF THE PROJECT GUTENBERG EBOOK"
 END_MARKER = "*** END OF THE PROJECT GUTENBERG EBOOK"
 
 
+def save_book(book_id: int, header: str, body: str, output_path: str) -> None:
+    """
+    Saves already-parsed header/body text for a book into the given
+    output directory, following the <book_id>.header.txt /
+    <book_id>.body.txt naming convention used across the datalake.
+
+    Split out from download_book() so that other code (e.g. benchmarks)
+    can reuse real, already-downloaded content for many book_ids without
+    needing network access.
+    """
+    output_dir = Path(output_path)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    body_path = output_dir / f"{book_id}.body.txt"
+    header_path = output_dir / f"{book_id}.header.txt"
+
+    with open(body_path, "w", encoding="utf-8") as f:
+        f.write(body.strip())
+
+    with open(header_path, "w", encoding="utf-8") as f:
+        f.write(header.strip())
+
+
 def download_book(book_id: int, output_path: str) -> bool:
     """
     Downloads a single book from Project Gutenberg and splits it into
@@ -24,9 +47,6 @@ def download_book(book_id: int, output_path: str) -> bool:
     Returns True on success, False if the book could not be parsed
     (e.g. markers not found) or downloaded.
     """
-    output_dir = Path(output_path)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
     url = f"https://www.gutenberg.org/cache/epub/{book_id}/pg{book_id}.txt"
 
     try:
@@ -43,17 +63,9 @@ def download_book(book_id: int, output_path: str) -> bool:
         return False
 
     header, body_and_footer = text.split(START_MARKER, 1)
-    body, footer = body_and_footer.split(END_MARKER, 1)
+    body, _footer = body_and_footer.split(END_MARKER, 1)
 
-    body_path = output_dir / f"{book_id}.body.txt"
-    header_path = output_dir / f"{book_id}.header.txt"
-
-    with open(body_path, "w", encoding="utf-8") as f:
-        f.write(body.strip())
-
-    with open(header_path, "w", encoding="utf-8") as f:
-        f.write(header.strip())
-
+    save_book(book_id, header, body, output_path)
     return True
 
 

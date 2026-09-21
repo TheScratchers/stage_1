@@ -4,8 +4,10 @@ test_output/
 datalake/
 datalake_book/
 datalake_batch/
+bench_data/
 datamarts/*.db
 datamarts/*.json
+!datamarts/benchmark_datalake_results.json
 datamarts/inverted_index/
 control/
 data/output/
