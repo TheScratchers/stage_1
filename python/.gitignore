@@ -2,6 +2,8 @@ __pycache__/
 *.pyc
 test_output/
 datalake/
+datalake_book/
+datalake_batch/
 datamarts/*.db
 datamarts/*.json
 datamarts/inverted_index/
