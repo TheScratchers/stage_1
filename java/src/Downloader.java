@@ -12,7 +12,7 @@ import java.util.regex.Pattern;
 public class Downloader {
     private static final String START_MARKER = "*** START OF THE PROJECT GUTENBERG EBOOK";
     private static final String END_MARKER = "*** END OF THE PROJECT GUTENBERG EBOOK";
-    private static final String DATALAKE_PATH = "data/datalake/";
+    private static final String DATALAKE_PATH = "../data/datalake/";
 
     public static boolean downloadBook(int bookId, String url) {
         try {
@@ -55,13 +55,5 @@ public class Downloader {
             e.printStackTrace();
             return false;
         }
-    }
-    
-    public static void main(String[] args) {
-        // Example 1: Standard Gutenberg URL
-        int bookId1 = 23;
-        String url1 = "https://www.gutenberg.org/cache/epub/" + bookId1 + "/pg" + bookId1 + ".txt";
-        downloadBook(bookId1, url1);
-
     }
 }

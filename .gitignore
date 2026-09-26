@@ -26,13 +26,17 @@ java/target/
 java/.gradle/
 java/build/
 *.class
-*.jar
 *.war
 *.ear
 *.db
 .classpath
 .project
 .settings/
+.vscode/
+data/datalake/*
+data/datamarts/*.db
+data/datamarts/*.json
+control/*.txt
 
 # ─── Python artifacts ───────────────────────────────────────
 python/__pycache__/
