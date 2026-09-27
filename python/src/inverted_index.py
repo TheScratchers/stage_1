@@ -11,6 +11,13 @@ book_ids where it appears:
     }
 
 Saved by default at: datamarts/inverted_index.json
+
+Trade-off: cheap once loaded (an app loads this file into memory once
+at startup, then every lookup is a plain dict access), but the whole
+file has to be parsed before the very first query can be answered, and
+that parsing cost grows with the size of the index. See
+benchmark_inverted_index.py for a concrete comparison against the
+hierarchical and MongoDB structures.
 """
 
 import json
@@ -19,6 +26,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+# Alphabetic-only: numbers and punctuation are dropped from the index
+# entirely, so a search only ever needs to match words.
 TOKEN_PATTERN = re.compile(r"[A-Za-z]+")
 
 
@@ -36,6 +45,9 @@ def build_index(datalake_dir: str) -> dict:
     for body_file in sorted(Path(datalake_dir).rglob("*.body.txt")):
         book_id = int(body_file.name.split(".")[0])
         text = body_file.read_text(encoding="utf-8")
+        # set(...) de-duplicates repeated words within the same book,
+        # since we only need to know THAT a term appears in book_id,
+        # not how many times.
         for term in set(tokenize(text)):
             index[term].add(book_id)
     return {term: sorted(ids) for term, ids in index.items()}
@@ -60,6 +72,9 @@ def update_index(index: dict, book_id: int, body_text: str) -> dict:
     """
     for term in set(tokenize(body_text)):
         postings = index.setdefault(term, [])
+        # Guard against re-indexing the same book twice (e.g. control.py
+        # re-running a step): without this check, running it again
+        # would append a duplicate book_id to the postings list.
         if book_id not in postings:
             postings.append(book_id)
             postings.sort()

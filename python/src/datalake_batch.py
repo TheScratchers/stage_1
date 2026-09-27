@@ -6,6 +6,11 @@ number of files stored in a single directory:
 
     <base_dir>/batch_0-999/<BOOK_ID>.body.txt
     <base_dir>/batch_1000-1999/<BOOK_ID>.body.txt
+
+Trade-off: a middle ground between the time-based layout (few
+directories, many files each) and the book-based layout (many
+directories, one file-pair each) - the batch size controls exactly
+where a project lands on that spectrum.
 """
 
 from pathlib import Path
@@ -19,6 +24,10 @@ def batch_based_path(base_dir: str, book_id: int, batch_size: int = DEFAULT_BATC
     """
     Returns the batch directory a book_id belongs to:
     <base_dir>/batch_<start>-<end>
+
+    Integer floor division groups ids into fixed-size, non-overlapping
+    ranges: e.g. with batch_size=1000, book_id 999 falls in
+    batch_0-999 and book_id 1000 falls in the next one, batch_1000-1999.
     """
     start = (book_id // batch_size) * batch_size
     end = start + batch_size - 1

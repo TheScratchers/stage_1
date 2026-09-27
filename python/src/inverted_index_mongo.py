@@ -13,6 +13,13 @@ Requires a MongoDB instance reachable at the given URI. For local
 development, start one with Docker:
 
     docker run -d --name stage1-mongo -p 27017:27017 mongo:7
+
+Trade-off: like the hierarchical structure, there's no "load the whole
+index" step - every lookup is a query. Unlike a plain file, MongoDB
+gives us a proper query engine and a unique index on `term` for fast
+lookups, at the cost of needing a running database process instead of
+just the filesystem. See benchmark_inverted_index.py for a concrete
+comparison (run with --mongo, since this needs a live database).
 """
 
 import re
@@ -33,6 +40,9 @@ def tokenize(text: str) -> list:
 def get_collection(uri: str = DEFAULT_URI, db_name: str = "stage1", collection_name: str = "inverted_index"):
     client = MongoClient(uri, serverSelectionTimeoutMS=5000)
     collection = client[db_name][collection_name]
+    # unique=True both speeds up search() (an index-backed lookup
+    # instead of a full collection scan) and prevents two documents
+    # for the same term from ever being created.
     collection.create_index([("term", ASCENDING)], unique=True)
     return client, collection
 
@@ -54,6 +64,8 @@ def build_index(datalake_dir: str, uri: str = DEFAULT_URI) -> int:
         collection.delete_many({})  # clean rebuild
         docs = [{"term": term, "postings": sorted(ids)} for term, ids in postings.items()]
         if docs:
+            # insert_many batches all documents into one round trip to
+            # the database, instead of one insert_one() call per term.
             collection.insert_many(docs)
         return len(docs)
     finally:
@@ -77,6 +89,10 @@ def update_index(book_id: int, body_text: str, uri: str = DEFAULT_URI) -> None:
     client, collection = get_collection(uri)
     try:
         for term in set(tokenize(body_text)):
+            # $addToSet only appends book_id if it isn't already in
+            # the postings array, so re-running this for the same book
+            # is safe; upsert=True creates the term's document the
+            # first time it's seen.
             collection.update_one(
                 {"term": term},
                 {"$addToSet": {"postings": book_id}},

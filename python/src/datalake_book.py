@@ -5,6 +5,11 @@ Each book gets its own dedicated directory:
 
     <base_dir>/<BOOK_ID>/<BOOK_ID>.body.txt
     <base_dir>/<BOOK_ID>/<BOOK_ID>.header.txt
+
+Trade-off: the opposite of the time-based layout - every book is
+fully isolated (never sharing a directory with unrelated books), at
+the cost of creating one directory per book, which adds overhead when
+ingesting many books (see benchmark_datalake.py).
 """
 
 from pathlib import Path

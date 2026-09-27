@@ -85,6 +85,8 @@ def benchmark_structure(name: str, path_fn, book_ids, content_by_real_id):
     # 1. Write throughput
     t0 = time.perf_counter()
     for book_id in book_ids:
+        # Cycle through the 3 real books so every synthetic id gets
+        # genuine header/body content instead of empty/dummy text.
         real_id = REAL_BOOK_IDS[book_id % len(REAL_BOOK_IDS)]
         header, body = content_by_real_id[real_id]
         out_dir = path_fn(str(base_dir), book_id)
@@ -132,6 +134,10 @@ def main():
     print(f"Benchmarking {n_books} synthetic books across 3 datalake structures...\n")
 
     results = []
+    # time_based_path() ignores book_id (every book ingested in the
+    # same hour lands in the same directory) - the lambda just adapts
+    # it to the same path_fn(base_dir, book_id) signature as the other
+    # two structures below.
     results.append(benchmark_structure("time_based", lambda b, i: time_based_path(b), book_ids, content_by_real_id))
     results.append(benchmark_structure("book_based", book_based_path, book_ids, content_by_real_id))
     results.append(benchmark_structure("batch_based", batch_based_path, book_ids, content_by_real_id))

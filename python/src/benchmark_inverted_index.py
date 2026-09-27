@@ -92,6 +92,10 @@ def build_synthetic_datalake(n_books: int, real_book_ids, start_id: int = 200000
     bodies = load_real_bodies(real_book_ids)
     book_ids = list(range(start_id, start_id + n_books))
     for book_id in book_ids:
+        # Cycling through real_book_ids means the vocabulary is fixed
+        # by CONTENT diversity (how many distinct real books we use),
+        # not by n_books - adding more synthetic ids just adds more
+        # book_ids to the postings lists of terms that already exist.
         real_id = real_book_ids[book_id % len(real_book_ids)]
         text = bodies[real_id]
         (SYNTHETIC_DATALAKE / f"{book_id}.body.txt").write_text(text, encoding="utf-8")

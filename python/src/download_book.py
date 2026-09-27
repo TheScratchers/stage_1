@@ -32,6 +32,8 @@ def save_book(book_id: int, header: str, body: str, output_path: str) -> None:
     body_path = output_dir / f"{book_id}.body.txt"
     header_path = output_dir / f"{book_id}.header.txt"
 
+    # .strip() drops the blank line(s) left behind right at the marker
+    # boundary, so files don't start/end with stray empty lines.
     with open(body_path, "w", encoding="utf-8") as f:
         f.write(body.strip())
 
@@ -58,10 +60,16 @@ def download_book(book_id: int, output_path: str) -> bool:
 
     text = response.text
 
+    # Not every Gutenberg text uses these exact markers (very old
+    # entries and some non-English texts differ), so we bail out
+    # cleanly instead of guessing where the real content starts.
     if START_MARKER not in text or END_MARKER not in text:
         print(f"[download_book] Markers not found for book {book_id}")
         return False
 
+    # split(..., 1) assumes each marker appears exactly once; the
+    # header is everything before START_MARKER, and the footer
+    # (license boilerplate) is discarded after splitting on END_MARKER.
     header, body_and_footer = text.split(START_MARKER, 1)
     body, _footer = body_and_footer.split(END_MARKER, 1)
 
