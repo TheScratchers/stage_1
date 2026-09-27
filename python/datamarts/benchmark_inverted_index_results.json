@@ -16,5 +16,11 @@
     "num_files": 8070,
     "num_dirs": 26,
     "total_size_bytes": 1198534
+  },
+  "mongodb": {
+    "structure": "mongodb",
+    "n_terms": 8070,
+    "build_seconds": 4.06,
+    "avg_lookup_ms": 24.1621
   }
 }
