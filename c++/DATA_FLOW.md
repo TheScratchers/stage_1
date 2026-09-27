@@ -6,71 +6,39 @@ This document details the pipeline architecture, codebase structure, and executi
 
 The C++ module is organized as follows:
 
-*   **`CMakeLists.txt`:** The build configuration file. It enforces the C++17 standard, configures compiler warnings, and links the required external libraries (`libcurl` for networking).
-*   **`include/ControlLayer.hpp`:** The header file defining the `ControlLayer` class. It declares the properties and methods needed to track the pipeline state and orchestrate downloads and indexing tasks.
-*   **`src/ControlLayer.cpp`:** The core implementation. It handles reading/writing state files, performing HTTP GET requests, text parsing, and creating the hierarchical Datalake folder structure.
-*   **`src/main.cpp`:** The application entry point. It initializes the `ControlLayer` and executes the pipeline loop based on a provided step count.
+*   **`CMakeLists.txt`:** Build configuration file enforcing C++17, compiler warnings, and linking `libcurl`.
+*   **`include/ControlLayer.hpp` / `src/ControlLayer.cpp`:** Orchestrator managing pipeline state and coordinating ingestion and indexing.
+*   **`include/MetadataExtractor.hpp` / `src/MetadataExtractor.cpp`:** Parses book metadata (`Title`, `Author`, `Language`) from header files and appends structured records to `datamarts/metadata.csv`.
+*   **`include/InvertedIndex.hpp` / `src/InvertedIndex.cpp`:** Tokenizes cleaned body text and maintains inverted index structures in both monolithic JSON and hierarchical directory layouts.
+*   **`src/main.cpp`:** Application entry point initializing `ControlLayer` and running the execution loop.
 
 ## 2. Pipeline Execution Flow
 
 The system operates as a **Task Queue** orchestrated by `ControlLayer::step()`. During each step, the system executes only one action, prioritizing indexing over downloading.
 
 ### Phase A: State Verification (Control Layer)
-1. The system reads `../control/downloaded_books.txt` and `../control/indexed_books.txt` into RAM (using `std::unordered_set` for O(1) lookups).
-2. It calculates the difference: *Are there downloaded books that have not been indexed yet?*
+1. The system reads `../control/downloaded_books.txt` and `../control/indexed_books.txt` into RAM using `std::unordered_set<int>` for O(1) lookups.
+2. It calculates pending books: `downloaded - indexed`.
 
 ### Phase B: Ingestion & Datalake (If no books are pending)
-If the state is up-to-date, the system ingests new data:
-1. **Target Selection:** Generates a random book ID (1-70000) and ensures it hasn't been downloaded before.
-2. **Download:** Uses `libcurl` to fetch the raw `.txt` payload from `gutenberg.org`.
-3. **Splitting:** Locates the `*** START` and `*** END` markers to isolate the book. Splits the content into `header` (metadata) and `body` (novel content).
-4. **Datalake Storage:** Creates a time-based directory structure (`data/datalake/YYYYMMDD/HH/`) using C++17 `<filesystem>` and `<chrono>`, saving `[id].header.txt` and `[id].body.txt`.
-5. **State Update:** Appends the new ID to `downloaded_books.txt`.
+If there are no pending books to index:
+1. **Target Selection:** Generates a random book ID (1–70000) not yet downloaded.
+2. **Download:** Uses `libcurl` to fetch the raw text from Project Gutenberg.
+3. **Splitting:** Locates `*** START OF THE PROJECT GUTENBERG EBOOK` and `*** END OF THE PROJECT GUTENBERG EBOOK` to separate the header and body text.
+4. **Datalake Storage:** Stores files in time-based partition format: `data/datalake/YYYYMMDD/HH/<book_id>.header.txt` and `<book_id>.body.txt`.
+5. **State Update:** Appends the ID to `control/downloaded_books.txt`.
 
 ### Phase C: Datamart Construction (If books are pending)
-If there is a book waiting to be indexed, the system skips Phase B and proceeds to process it:
-1. **Metadata Extraction (Next Step):** Will read `[id].header.txt` to parse Title/Author.
-2. **Inverted Index (Next Step):** Will read `[id].body.txt` to tokenize words and map them to the book ID.
-3. **State Update:** Appends the ID to `indexed_books.txt`.
+If pending books exist, the system selects the oldest pending ID:
+1. **File Retrieval:** Recursively locates `<book_id>.header.txt` and `<book_id>.body.txt` inside the datalake.
+2. **Metadata Extraction:** `MetadataExtractor` parses `Title`, `Author`, and `Language` using regex and saves the record into `data/datamarts/metadata.csv`.
+3. **Inverted Index Construction:** `InvertedIndex` extracts words, normalizes them to lowercase, and updates:
+   - **Monolithic JSON Index:** `data/datamarts/inverted_index.json` (maps terms to sorted posting lists: `{"term": [id1, id2]}`).
+   - **Hierarchical Index:** `data/datamarts/inverted_index/<Letter>/<term>.txt` (stores document IDs line-by-line).
+4. **State Update:** Appends the ID to `control/indexed_books.txt`.
 
-## 3. Dependencies and Build Process
+## 3. Benchmarking Strategy & Datamart Formats
 
-This module requires a C++17 compliant compiler and `libcurl`. On Windows, the recommended environment is **MinGW-w64 (MSYS2) or WinLibs**.
-
-### Prerequisites (Windows)
-Ensure you have GCC, CMake, and Ninja/Make installed and added to your system `PATH`. You also need the `curl` development headers and binaries.
-
-### Compilation and Execution
-To compile and run the project, open a terminal (e.g., Developer PowerShell or an MSYS2 terminal) and execute the following commands from the `/c++` directory:
-
-1. **Configure the build environment:**
-   ```bash
-   cmake -B build -S . -G "Ninja" -DCMAKE_CXX_COMPILER=g++
-   ```
-
-2. **Build the project:**
-   ```bash
-   cmake --build build
-   ```
-
-3. **Run the application:**
-   ```bash
-   ./build/search_engine
-   ```
-
-## 4. Next Steps / To-Do
-
-The remaining tasks for completing the C++ Data Layer implementation according to Phase C (Datamart Construction) are:
-
-* **Metadata Extraction (Datamart):**
-  * Read and parse `[id].header.txt` files to extract key metadata fields (e.g., Title, Author, Language).
-  * Design the structured schema and persist metadata into a database or structured format (e.g., SQLite).
-
-* **Inverted Index Engine (Datamart):**
-  * Read and process `[id].body.txt` from the Datalake.
-  * Implement text tokenization, normalization (lowercasing, punctuation stripping, stop-word removal), and mapping of terms to book IDs.
-  * Implement and benchmark storage mechanisms (e.g., monolithic JSON/binary file, NoSQL/MongoDB, or custom/sharded structure).
-
-* **Indexer Integration in Control Layer:**
-  * Replace the placeholder logic in `ControlLayer::indexBook(int bookId)` with the concrete indexing and metadata extraction pipeline.
-  * Ensure `indexed_books.txt` is updated upon successful completion of each book's indexing.
+As required by the Stage 1 guidelines and benchmarking specifications:
+* **Storage Structure Comparison:** The implementation produces both single monolithic file (`inverted_index.json`) and hierarchical folder structure (`inverted_index/<A>/<term>.txt`) to benchmark file write/lookup overhead across structures and languages.
+* **Release Build Performance:** Benchmarks should be compiled with release optimizations (`-O2` or `-O3`) to record execution times, indexing throughput, and memory consumption.
