@@ -5,9 +5,11 @@ datalake/
 datalake_book/
 datalake_batch/
 bench_data/
+bench_data_idx/
 datamarts/*.db
 datamarts/*.json
 !datamarts/benchmark_datalake_results.json
+!datamarts/benchmark_inverted_index_results.json
 datamarts/inverted_index/
 control/
 data/output/
