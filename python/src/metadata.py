@@ -18,6 +18,9 @@ import re
 import sqlite3
 from pathlib import Path
 
+# re.MULTILINE lets "^" match the start of each line in the header
+# (not just the start of the whole string), since these fields can
+# appear anywhere in a multi-line Gutenberg header block.
 FIELD_PATTERNS = {
     "title": re.compile(r"^Title:\s*(.+)$", re.MULTILINE),
     "author": re.compile(r"^Author:\s*(.+)$", re.MULTILINE),
@@ -68,6 +71,9 @@ def upsert_book(
 ) -> None:
     """Inserts a book's metadata, or updates it if the id already exists."""
     conn = sqlite3.connect(db_path)
+    # ON CONFLICT ... DO UPDATE (upsert) means index_metadata / control.py
+    # can be re-run safely over the same book_id without raising a
+    # duplicate-key error or requiring a separate "does it exist?" check.
     conn.execute(
         """
         INSERT INTO books (book_id, title, author, language, body_path, header_path)
@@ -96,6 +102,10 @@ def index_metadata(datalake_dir: str, db_path: str = "datamarts/books.db") -> in
         book_id = int(header_file.name.split(".")[0])
         header_text = header_file.read_text(encoding="utf-8")
         meta = parse_header(header_text)
+        # Body file is assumed to sit next to its header (same
+        # directory, same book_id prefix) - true for every datalake
+        # structure in this project since download_book() writes both
+        # files into the same output directory.
         body_file = header_file.parent / f"{book_id}.body.txt"
 
         upsert_book(

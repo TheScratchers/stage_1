@@ -14,6 +14,12 @@ file per term containing its postings list (one book_id per line):
 This trades a single large file for many small ones: updates only
 touch the file(s) of the terms that changed, instead of rewriting
 everything.
+
+Trade-off: no upfront "load the whole index" cost like the monolithic
+JSON structure, but every single lookup means opening one file from
+disk, so the per-query cost stays roughly constant no matter how big
+the overall index grows. See benchmark_inverted_index.py for a
+concrete comparison.
 """
 
 import re
@@ -29,6 +35,9 @@ def tokenize(text: str) -> list:
 
 
 def _term_path(term: str, index_root: str) -> Path:
+    # Terms are alphabetic by construction (see TOKEN_PATTERN), but we
+    # still fall back to an "_" bucket defensively in case this ever
+    # gets called with an empty or non-alphabetic string.
     first_letter = term[0].upper() if term and term[0].isalpha() else "_"
     return Path(index_root) / first_letter / f"{term}.txt"
 
@@ -45,6 +54,9 @@ def build_index(datalake_dir: str, index_root: str = "datamarts/inverted_index")
         for term in set(tokenize(text)):
             postings[term].add(book_id)
 
+    # Unlike the monolithic JSON structure (one write for the whole
+    # index), a full build here means one file write per unique term -
+    # this is the main cost of this structure (see the benchmark).
     for term, book_ids in postings.items():
         path = _term_path(term, index_root)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -76,6 +88,9 @@ def update_index(
     for term in set(tokenize(body_text)):
         path = _term_path(term, index_root)
         path.parent.mkdir(parents=True, exist_ok=True)
+        # Read-modify-write: load the existing postings for this term
+        # (if any), add this book_id, and rewrite just this one file -
+        # every other term's file is untouched.
         existing = set()
         if path.exists():
             existing = {

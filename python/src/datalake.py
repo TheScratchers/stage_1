@@ -8,6 +8,12 @@ Recommended layout (Section 3 of the guide):
 
 where YYYYMMDD is the date of download and HH is the hour (24h format)
 at the moment of ingestion.
+
+Trade-off: cheap to write (all books ingested in the same hour share
+one directory, so there's little directory-creation overhead), but
+that same directory can accumulate a lot of files if many books are
+ingested in a short time window - see benchmark_datalake.py for a
+concrete comparison against the book-based and batch-based layouts.
 """
 
 from datetime import datetime

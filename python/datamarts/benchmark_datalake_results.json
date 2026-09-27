@@ -1,0 +1,44 @@
+{
+  "n_books": 200,
+  "results": [
+    {
+      "structure": "time_based",
+      "n_books": 200,
+      "write_seconds": 16.348,
+      "write_books_per_sec": 12.2,
+      "lookup_n": 200,
+      "lookup_seconds": 3.602,
+      "lookup_avg_ms": 18.0101,
+      "num_dirs_created": 2,
+      "max_depth": 3,
+      "avg_files_per_dir": 200.0,
+      "max_files_per_dir": 200
+    },
+    {
+      "structure": "book_based",
+      "n_books": 200,
+      "write_seconds": 17.9901,
+      "write_books_per_sec": 11.1,
+      "lookup_n": 200,
+      "lookup_seconds": 4.0625,
+      "lookup_avg_ms": 20.3123,
+      "num_dirs_created": 200,
+      "max_depth": 2,
+      "avg_files_per_dir": 1.0,
+      "max_files_per_dir": 1
+    },
+    {
+      "structure": "batch_based",
+      "n_books": 200,
+      "write_seconds": 15.9098,
+      "write_books_per_sec": 12.6,
+      "lookup_n": 200,
+      "lookup_seconds": 3.3044,
+      "lookup_avg_ms": 16.5219,
+      "num_dirs_created": 1,
+      "max_depth": 2,
+      "avg_files_per_dir": 200.0,
+      "max_files_per_dir": 200
+    }
+  ]
+}
