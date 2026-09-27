@@ -2,6 +2,8 @@
 #include <iostream>
 #include <string>
 
+// Entry point. Accepts an optional step count as argv[1] (default: 1).
+// Initializes the ControlLayer and runs the pipeline for the given number of steps.
 int main(int argc, char* argv[]) {
     std::cout << "=== Stage 1: C++ Search Engine Pipeline ===\n";
 
@@ -14,8 +16,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Initialize ControlLayer pointing to stage_1 control and data directories
-    ControlLayer orchestrator("../control", "../data/datalake");
+    ControlLayer orchestrator("../control", "../data/datalake", "../data/datamarts");
 
     std::cout << "Running " << steps << " pipeline step(s)...\n";
     orchestrator.run(steps);

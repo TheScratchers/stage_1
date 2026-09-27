@@ -1,4 +1,6 @@
 #include "ControlLayer.hpp"
+#include "MetadataExtractor.hpp"
+#include "InvertedIndex.hpp"
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -11,6 +13,7 @@
 
 namespace fs = std::filesystem;
 
+// libcurl callback: appends each received chunk to the response string.
 static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
     size_t totalSize = size * nmemb;
     std::string* s = static_cast<std::string*>(userp);
@@ -18,15 +21,22 @@ static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* use
     return totalSize;
 }
 
-ControlLayer::ControlLayer(const std::string& controlDir, const std::string& datalakeDir)
+// Initializes directory paths and creates them on disk if they don't exist.
+ControlLayer::ControlLayer(const std::string& controlDir,
+                           const std::string& datalakeDir,
+                           const std::string& datamartDir)
     : controlPath(controlDir),
       downloadedFile(controlDir + "/downloaded_books.txt"),
       indexedFile(controlDir + "/indexed_books.txt"),
-      datalakePath(datalakeDir) {
+      datalakePath(datalakeDir),
+      datamartPath(datamartDir) {
     fs::create_directories(controlPath);
     fs::create_directories(datalakePath);
+    fs::create_directories(datamartPath);
 }
 
+// Reads a file of book IDs (one per line) into an unordered_set.
+// Returns an empty set if the file doesn't exist yet.
 std::unordered_set<int> ControlLayer::readIds(const std::string& filePath) {
     std::unordered_set<int> ids;
     std::ifstream file(filePath);
@@ -45,6 +55,7 @@ std::unordered_set<int> ControlLayer::readIds(const std::string& filePath) {
     return ids;
 }
 
+// Appends a single book ID on a new line to the given control file.
 void ControlLayer::appendId(const std::string& filePath, int bookId) {
     std::ofstream file(filePath, std::ios::app);
     if (file.is_open()) {
@@ -52,6 +63,9 @@ void ControlLayer::appendId(const std::string& filePath, int bookId) {
     }
 }
 
+// Downloads a book from Project Gutenberg via HTTP, splits the raw text on the
+// Gutenberg START/END markers into a header (metadata) and body (novel text),
+// and writes both files under datalake/YYYYMMDD/HH/.
 bool ControlLayer::downloadBook(int bookId) {
     std::string url = "https://www.gutenberg.org/cache/epub/" + std::to_string(bookId) + "/pg" + std::to_string(bookId) + ".txt";
     
@@ -90,9 +104,10 @@ bool ControlLayer::downloadBook(int bookId) {
         return false;
     }
 
-    size_t headerEnd = startPos;
-    std::string header = responseData.substr(0, headerEnd);
+    // Everything before START is the header (Gutenberg metadata)
+    std::string header = responseData.substr(0, startPos);
 
+    // Everything between the line after START and END is the body (novel text)
     size_t bodyStart = responseData.find('\n', startPos);
     if (bodyStart == std::string::npos || bodyStart >= endPos) {
         bodyStart = startPos + startMarker.length();
@@ -101,7 +116,7 @@ bool ControlLayer::downloadBook(int bookId) {
     }
     std::string body = responseData.substr(bodyStart, endPos - bodyStart);
 
-    // Time-based directory layout: datalake/YYYYMMDD/HH/
+    // Build the time-based datalake path: datalake/YYYYMMDD/HH/
     auto now = std::chrono::system_clock::now();
     std::time_t now_c = std::chrono::system_clock::to_time_t(now);
     std::tm tm_struct{};
@@ -132,29 +147,60 @@ bool ControlLayer::downloadBook(int bookId) {
     return true;
 }
 
+// Locates book files in the datalake, extracts metadata into the datamart,
+// and updates both monolithic JSON and hierarchical inverted indexes.
 bool ControlLayer::indexBook(int bookId) {
-    // Check if book files exist in datalake
-    bool found = false;
+    fs::path bodyFile;
+    fs::path headerFile;
+    std::string targetBody = std::to_string(bookId) + ".body.txt";
+    std::string targetHeader = std::to_string(bookId) + ".header.txt";
+
+    // Search for book files in the datalake hierarchy
     for (const auto& entry : fs::recursive_directory_iterator(datalakePath)) {
-        if (entry.is_regular_file() && entry.path().filename() == (std::to_string(bookId) + ".body.txt")) {
-            found = true;
+        if (!entry.is_regular_file()) continue;
+
+        if (entry.path().filename() == targetBody) {
+            bodyFile = entry.path();
+        } else if (entry.path().filename() == targetHeader) {
+            headerFile = entry.path();
+        }
+        if (!bodyFile.empty() && !headerFile.empty()) {
             break;
         }
     }
-    if (!found) {
+
+    if (bodyFile.empty() || headerFile.empty()) {
         std::cerr << "[CONTROL] Could not locate files for book " << bookId << " in datalake.\n";
         return false;
     }
 
-    // Placeholder indexing step for Stage 1 (mirrors pipeline indexing)
-    std::cout << "[INDEXER] Indexed book " << bookId << " successfully.\n";
+    // 1. Extract metadata and save to datamart CSV
+    std::ifstream hStream(headerFile);
+    std::string headerText((std::istreambuf_iterator<char>(hStream)), std::istreambuf_iterator<char>());
+    BookMetadata meta = MetadataExtractor::parseHeader(bookId, headerText);
+    MetadataExtractor::saveToCsv(meta, datamartPath + "/metadata.csv");
+
+    // 2. Read body content and update inverted indexes
+    std::ifstream bStream(bodyFile);
+    std::string bodyText((std::istreambuf_iterator<char>(bStream)), std::istreambuf_iterator<char>());
+
+    // Monolithic JSON structure
+    InvertedIndex::updateMonolithicIndex(bookId, bodyText, datamartPath + "/inverted_index.json");
+
+    // Hierarchical folder structure
+    InvertedIndex::updateHierarchicalIndex(bookId, bodyText, datamartPath + "/inverted_index");
+
+    std::cout << "[INDEXER] Successfully indexed metadata and inverted index for book " << bookId << ".\n";
     return true;
 }
 
+// Decides what to do each step: index the oldest pending book if any,
+// otherwise pick a random unseen ID and download it.
 void ControlLayer::step() {
     auto downloaded = readIds(downloadedFile);
     auto indexed = readIds(indexedFile);
 
+    // Compute the set of books that have been downloaded but not yet indexed
     std::vector<int> readyToIndex;
     for (int id : downloaded) {
         if (indexed.find(id) == indexed.end()) {
@@ -173,6 +219,7 @@ void ControlLayer::step() {
             std::cerr << "[CONTROL] Failed to index book " << bookId << ".\n";
         }
     } else {
+        // No pending books: pick a random ID not yet downloaded and fetch it
         std::random_device rd;
         std::mt19937 gen(rd());
         std::uniform_int_distribution<> distrib(1, 70000);
@@ -193,6 +240,7 @@ void ControlLayer::step() {
     }
 }
 
+// Runs step() N times sequentially.
 void ControlLayer::run(int steps) {
     for (int i = 0; i < steps; ++i) {
         step();
