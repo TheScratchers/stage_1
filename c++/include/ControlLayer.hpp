@@ -3,41 +3,55 @@
 #include <string>
 #include <vector>
 #include <unordered_set>
+#include <filesystem>
+#include "Datalake.hpp"
+#include "MetadataExtractor.hpp"
+#include "InvertedIndex.hpp"
 
-// Orchestrates the pipeline: downloads books from Gutenberg into the datalake
-// and indexes them into the datamart. Each step either indexes a pending book
-// or downloads a new one, never both.
+// Coordinates data ingestion from Project Gutenberg into the Datalake
+// and indexing into Datamarts (SQLite, Monolithic JSON, Hierarchical, Binary Compact).
 class ControlLayer {
 public:
-    // Sets up directory paths and creates them if they don't exist.
-    ControlLayer(const std::string& controlDir = "../control",
-                 const std::string& datalakeDir = "../data/datalake",
-                 const std::string& datamartDir = "../data/datamarts");
+    // Resolves directories automatically based on execution context (root or build dir).
+    ControlLayer(
+        const std::string& controlDir = "",
+        const std::string& datalakeDir = "",
+        const std::string& datamartDir = ""
+    );
 
-    // Runs a single pipeline step: index one pending book, or download a new one.
-    void step();
+    // Executes a single pipeline step: index pending book, or download a new one.
+    bool step();
 
-    // Runs step() N times sequentially.
+    // Runs N steps sequentially.
     void run(int steps);
 
+    // Manually ingests an already available book (e.g. from sample dataset).
+    bool ingestSampleBook(int bookId, const std::string& header, const std::string& body);
+
+    // Getters for paths
+    std::filesystem::path getControlPath() const { return controlPath; }
+    std::filesystem::path getDatalakePath() const { return datalakePath; }
+    std::filesystem::path getDatamartPath() const { return datamartPath; }
+
+    // Reads control IDs from file.
+    static std::unordered_set<int> readIds(const std::filesystem::path& filePath);
+
+    // Appends an ID to a control file.
+    static void appendId(const std::filesystem::path& filePath, int bookId);
+
 private:
-    std::string controlPath;    // Path to the control directory
-    std::string downloadedFile; // Tracks downloaded book IDs (one per line)
-    std::string indexedFile;    // Tracks indexed book IDs (one per line)
-    std::string datalakePath;   // Root of the datalake directory
-    std::string datamartPath;   // Root of the datamart directory
+    std::filesystem::path controlPath;
+    std::filesystem::path downloadedFile;
+    std::filesystem::path indexedFile;
+    std::filesystem::path datalakePath;
+    std::filesystem::path datamartPath;
 
-    // Reads a control file and returns all IDs as an unordered_set for O(1) lookup.
-    std::unordered_set<int> readIds(const std::string& filePath);
-
-    // Appends a single book ID to a control file.
-    void appendId(const std::string& filePath, int bookId);
-
-    // Downloads a book from Gutenberg, splits it into header/body, and saves
-    // both under datalake/YYYYMMDD/HH/<bookId>.{header,body}.txt
+    // Downloads a book from Project Gutenberg and stores it in the Datalake.
     bool downloadBook(int bookId);
 
-    // Locates book files in the datalake, extracts metadata into the datamart,
-    // and builds the inverted indexes (monolithic JSON and hierarchical folders).
+    // Indexes a book from Datalake into Datamarts (SQLite + 3 Inverted Index structures).
     bool indexBook(int bookId);
+
+    // Resolves appropriate base directories automatically.
+    void resolvePaths(const std::string& controlDir, const std::string& datalakeDir, const std::string& datamartDir);
 };
