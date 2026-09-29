@@ -17,7 +17,7 @@ The C++ module implements the complete **Data Layer** for Stage 1 of the search 
    - Full automated benchmark measuring write throughput, lookup latency, and filesystem overhead.
 
 2. **Datamarts**:
-   - **Structured Metadata (SQLite & CSV):** Stores parsed Gutenberg metadata (`book_id`, `title`, `author`, `language`, `ingested_at`, `header_path`, `body_path`) in `data/datamarts/metadata.db` with indexed lookups by author, title, and book ID.
+   - **Structured Metadata (SQLite):** Stores parsed Gutenberg metadata (`book_id`, `title`, `author`, `language`, `ingested_at`, `header_path`, `body_path`) in `data/datamarts/metadata.db` with indexed lookups by author, title, and book ID.
    - **Inverted Index (3 Distinct Architectures):**
      1. **Monolithic JSON:** `data/datamarts/inverted_index.json`
      2. **Hierarchical Folders:** `data/datamarts/inverted_index_hier/<Letter>/<term>.txt`
