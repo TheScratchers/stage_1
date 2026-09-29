@@ -6,7 +6,9 @@
 #include <filesystem>
 #include "Datalake.hpp"
 #include "MetadataExtractor.hpp"
-#include "InvertedIndex.hpp"
+#include "JsonIndex.hpp"
+#include "HierarchicalIndex.hpp"
+#include "BinaryIndex.hpp"
 
 // Coordinates data ingestion from Project Gutenberg into the Datalake
 // and indexing into Datamarts (SQLite, Monolithic JSON, Hierarchical, Binary Compact).

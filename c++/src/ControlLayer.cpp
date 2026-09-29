@@ -175,9 +175,9 @@ bool ControlLayer::indexBook(int bookId) {
     fs::path hierDir  = datamartPath / "inverted_index_hier";
     fs::path binPath  = datamartPath / "inverted_index.bin";
 
-    InvertedIndex::updateMonolithicIndex(bookId, bodyText, jsonPath.string());
-    InvertedIndex::updateHierarchicalIndex(bookId, bodyText, hierDir.string());
-    InvertedIndex::updateBinaryIndex(bookId, bodyText, binPath.string());
+    JsonIndex::update(bookId, bodyText, jsonPath.string());
+    HierarchicalIndex::update(bookId, bodyText, hierDir.string());
+    BinaryIndex::update(bookId, bodyText, binPath.string());
 
     std::cout << "[INDEXER] Successfully indexed book " << bookId 
               << " (\"" << meta.title << "\" by " << meta.author << ") across all datamarts.\n";
