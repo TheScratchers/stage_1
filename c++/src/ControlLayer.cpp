@@ -28,7 +28,7 @@ void ControlLayer::resolvePaths(const std::string& controlDir, const std::string
         fs::path root = fs::current_path();
         while (root.has_parent_path() && 
                !fs::exists(root / "stage_1_building_data_layer.pdf") && 
-               !fs::exists(root / "README.md")) {
+               !fs::exists(root / ".git")) {
             root = root.parent_path();
         }
 

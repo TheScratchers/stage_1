@@ -321,6 +321,7 @@ bool InvertedIndex::updateBinaryIndex(int bookId, const std::string& bodyText, c
                 }
 
                 for (const auto& e : entries) {
+                    in.clear();
                     in.seekg(e.offset);
                     std::vector<int> ids(e.count);
                     for (uint32_t c = 0; c < e.count; ++c) {
@@ -393,6 +394,7 @@ std::vector<int> InvertedIndex::searchBinary(const std::string& term, const std:
     if (!found || matchedCount == 0) return {};
 
     // Direct seek to postings offset: reads only the target term's postings
+    in.clear();
     in.seekg(matchedOffset);
     std::vector<int> results(matchedCount);
     for (uint32_t i = 0; i < matchedCount; ++i) {
