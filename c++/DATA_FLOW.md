@@ -1,44 +1,59 @@
 # C++ Data Layer Architecture & Execution Flow
 
-This document details the pipeline architecture, codebase structure, and execution process for the C++ module in Stage 1. The goal of this phase is to build the foundational data infrastructure (Control Layer, Datalake, and Datamarts) by fetching and organizing raw texts from Project Gutenberg.
+This document details the pipeline architecture, codebase structure, and execution process for the C++ module in Stage 1.
+
+---
 
 ## 1. Codebase Structure
 
 The C++ module is organized as follows:
 
-*   **`CMakeLists.txt`:** Build configuration file enforcing C++17, compiler warnings, and linking `libcurl`.
-*   **`include/ControlLayer.hpp` / `src/ControlLayer.cpp`:** Orchestrator managing pipeline state and coordinating ingestion and indexing.
-*   **`include/MetadataExtractor.hpp` / `src/MetadataExtractor.cpp`:** Parses book metadata (`Title`, `Author`, `Language`) from header files and appends structured records to `datamarts/metadata.csv`.
-*   **`include/InvertedIndex.hpp` / `src/InvertedIndex.cpp`:** Tokenizes cleaned body text and maintains inverted index structures in both monolithic JSON and hierarchical directory layouts.
-*   **`src/main.cpp`:** Application entry point initializing `ControlLayer` and running the execution loop.
+*   **`CMakeLists.txt` / `Makefile`:** Build configuration enforcing C++17, `-O2` optimization, linking `libcurl` and `sqlite3`.
+*   **`include/Datalake.hpp` / `src/Datalake.cpp`:** Implements 3 partitioning strategies (Time-based, Book-based, and Batch-based) and the Datalake benchmark runner.
+*   **`include/MetadataExtractor.hpp` / `src/MetadataExtractor.cpp`:** Parses Gutenberg header fields (`Title`, `Author`, `Language`) and stores them in SQLite (`metadata.db`) and CSV (`metadata.csv`), with queries by author, title, and ID.
+*   **`include/InvertedIndex.hpp` / `src/InvertedIndex.cpp`:** Tokenizes cleaned text and manages 3 inverted index structures (Monolithic JSON, Hierarchical Folders, and Custom Binary Compact Index `BIDX`), plus Boolean search (AND / OR) and benchmarking.
+*   **`include/ControlLayer.hpp` / `src/ControlLayer.cpp`:** Orchestrator managing pipeline state (`downloaded_books.txt`, `indexed_books.txt`), automated path resolution, Gutenberg fetching, and multi-datamart updates.
+*   **`src/main.cpp`:** Application entry point and CLI suite supporting pipeline execution, querying, and benchmarking.
+
+---
 
 ## 2. Pipeline Execution Flow
 
 The system operates as a **Task Queue** orchestrated by `ControlLayer::step()`. During each step, the system executes only one action, prioritizing indexing over downloading.
 
-### Phase A: State Verification (Control Layer)
-1. The system reads `../control/downloaded_books.txt` and `../control/indexed_books.txt` into RAM using `std::unordered_set<int>` for O(1) lookups.
-2. It calculates pending books: `downloaded - indexed`.
+```
+       ┌───────────────────────────────┐
+       │   Control Layer: step()       │
+       │   Reads downloaded & indexed  │
+       └──────────────┬────────────────┘
+                      │
+           Pending books to index?
+             /                 \
+          YES                   NO
+          /                       \
+┌─────────────────────┐   ┌────────────────────────────────┐
+│  Phase C: Indexing  │   │  Phase B: Ingestion (Datalake) │
+│  1. Locate in lake  │   │  1. Pick unseen random ID      │
+│  2. Extract metadata│   │  2. Download via libcurl       │
+│  3. Save to SQLite  │   │  3. Detect START/END markers   │
+│  4. Update 3 Indexes│   │  4. Split into Header & Body   │
+│  5. Append indexed  │   │  5. Save to YYYYMMDD/HH/       │
+└─────────────────────┘   │  6. Append downloaded          │
+                          └────────────────────────────────┘
+```
 
-### Phase B: Ingestion & Datalake (If no books are pending)
-If there are no pending books to index:
-1. **Target Selection:** Generates a random book ID (1–70000) not yet downloaded.
-2. **Download:** Uses `libcurl` to fetch the raw text from Project Gutenberg.
-3. **Splitting:** Locates `*** START OF THE PROJECT GUTENBERG EBOOK` and `*** END OF THE PROJECT GUTENBERG EBOOK` to separate the header and body text.
-4. **Datalake Storage:** Stores files in time-based partition format: `data/datalake/YYYYMMDD/HH/<book_id>.header.txt` and `<book_id>.body.txt`.
-5. **State Update:** Appends the ID to `control/downloaded_books.txt`.
+---
 
-### Phase C: Datamart Construction (If books are pending)
-If pending books exist, the system selects the oldest pending ID:
-1. **File Retrieval:** Recursively locates `<book_id>.header.txt` and `<book_id>.body.txt` inside the datalake.
-2. **Metadata Extraction:** `MetadataExtractor` parses `Title`, `Author`, and `Language` using regex and saves the record into `data/datamarts/metadata.csv`.
-3. **Inverted Index Construction:** `InvertedIndex` extracts words, normalizes them to lowercase, and updates:
-   - **Monolithic JSON Index:** `data/datamarts/inverted_index.json` (maps terms to sorted posting lists: `{"term": [id1, id2]}`).
-   - **Hierarchical Index:** `data/datamarts/inverted_index/<Letter>/<term>.txt` (stores document IDs line-by-line).
-4. **State Update:** Appends the ID to `control/indexed_books.txt`.
+## 3. Storage Layer Details
 
-## 3. Benchmarking Strategy & Datamart Formats
+### Datalake Partitioning
+- **Time-Based:** `data/datalake/YYYYMMDD/HH/<BOOK_ID>.{header,body}.txt`
+- **Book-Based:** `data/datalake/<BOOK_ID>/<BOOK_ID>.{header,body}.txt`
+- **Batch-Based:** `data/datalake/batch_<N>/<BOOK_ID>.{header,body}.txt` (500 books/folder)
 
-As required by the Stage 1 guidelines and benchmarking specifications:
-* **Storage Structure Comparison:** The implementation produces both single monolithic file (`inverted_index.json`) and hierarchical folder structure (`inverted_index/<A>/<term>.txt`) to benchmark file write/lookup overhead across structures and languages.
-* **Release Build Performance:** Benchmarks should be compiled with release optimizations (`-O2` or `-O3`) to record execution times, indexing throughput, and memory consumption.
+### Datamarts
+- **SQLite Database:** `data/datamarts/metadata.db` with table `books`:
+  `book_id (PK), title, author, language, header_path, body_path, ingested_at`
+- **Monolithic JSON Index:** `data/datamarts/inverted_index.json`
+- **Hierarchical Index:** `data/datamarts/inverted_index_hier/<Letter>/<term>.txt`
+- **Binary Compact Index:** `data/datamarts/inverted_index.bin` (`BIDX` magic, term dictionary table with disk offsets, direct random seek postings lookup).
