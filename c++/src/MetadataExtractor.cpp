@@ -177,6 +177,32 @@ static BookMetadata rowToMetadata(sqlite3_stmt* stmt) {
     return m;
 }
 
+// Helper function to execute a SELECT query returning BookMetadata rows.
+static std::vector<BookMetadata> executeSelectQuery(const std::string& dbPath, const std::string& sql, const std::string* param = nullptr) {
+    std::vector<BookMetadata> results;
+    if (!fs::exists(dbPath)) return results;
+
+    sqlite3* db = nullptr;
+    if (sqlite3_open(dbPath.c_str(), &db) != SQLITE_OK) {
+        if (db) sqlite3_close(db);
+        return results;
+    }
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+        if (param) {
+            std::string pattern = "%" + *param + "%";
+            sqlite3_bind_text(stmt, 1, pattern.c_str(), -1, SQLITE_TRANSIENT);
+        }
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            results.push_back(rowToMetadata(stmt));
+        }
+        sqlite3_finalize(stmt);
+    }
+    sqlite3_close(db);
+    return results;
+}
+
 // Queries a book by ID.
 std::optional<BookMetadata> MetadataExtractor::queryById(int bookId, const std::string& dbPath) {
     if (!fs::exists(dbPath)) return std::nullopt;
@@ -208,89 +234,29 @@ std::optional<BookMetadata> MetadataExtractor::queryById(int bookId, const std::
 
 // Queries books matching an author substring.
 std::vector<BookMetadata> MetadataExtractor::queryByAuthor(const std::string& authorSubstring, const std::string& dbPath) {
-    std::vector<BookMetadata> results;
-    if (!fs::exists(dbPath)) return results;
-
-    sqlite3* db = nullptr;
-    if (sqlite3_open(dbPath.c_str(), &db) != SQLITE_OK) {
-        if (db) sqlite3_close(db);
-        return results;
-    }
-
-    const char* sql = "SELECT book_id, title, author, language, header_path, body_path, ingested_at FROM books WHERE author LIKE ? ORDER BY book_id ASC;";
-    sqlite3_stmt* stmt = nullptr;
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
-        sqlite3_close(db);
-        return results;
-    }
-
-    std::string pattern = "%" + authorSubstring + "%";
-    sqlite3_bind_text(stmt, 1, pattern.c_str(), -1, SQLITE_TRANSIENT);
-
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        results.push_back(rowToMetadata(stmt));
-    }
-
-    sqlite3_finalize(stmt);
-    sqlite3_close(db);
-    return results;
+    return executeSelectQuery(
+        dbPath,
+        "SELECT book_id, title, author, language, header_path, body_path, ingested_at FROM books WHERE author LIKE ? ORDER BY book_id ASC;",
+        &authorSubstring
+    );
 }
 
 // Queries books matching a title substring.
 std::vector<BookMetadata> MetadataExtractor::queryByTitle(const std::string& titleSubstring, const std::string& dbPath) {
-    std::vector<BookMetadata> results;
-    if (!fs::exists(dbPath)) return results;
-
-    sqlite3* db = nullptr;
-    if (sqlite3_open(dbPath.c_str(), &db) != SQLITE_OK) {
-        if (db) sqlite3_close(db);
-        return results;
-    }
-
-    const char* sql = "SELECT book_id, title, author, language, header_path, body_path, ingested_at FROM books WHERE title LIKE ? ORDER BY book_id ASC;";
-    sqlite3_stmt* stmt = nullptr;
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
-        sqlite3_close(db);
-        return results;
-    }
-
-    std::string pattern = "%" + titleSubstring + "%";
-    sqlite3_bind_text(stmt, 1, pattern.c_str(), -1, SQLITE_TRANSIENT);
-
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        results.push_back(rowToMetadata(stmt));
-    }
-
-    sqlite3_finalize(stmt);
-    sqlite3_close(db);
-    return results;
+    return executeSelectQuery(
+        dbPath,
+        "SELECT book_id, title, author, language, header_path, body_path, ingested_at FROM books WHERE title LIKE ? ORDER BY book_id ASC;",
+        &titleSubstring
+    );
 }
 
 // Retrieves all books from the database.
 std::vector<BookMetadata> MetadataExtractor::getAllBooks(const std::string& dbPath) {
-    std::vector<BookMetadata> results;
-    if (!fs::exists(dbPath)) return results;
-
-    sqlite3* db = nullptr;
-    if (sqlite3_open(dbPath.c_str(), &db) != SQLITE_OK) {
-        if (db) sqlite3_close(db);
-        return results;
-    }
-
-    const char* sql = "SELECT book_id, title, author, language, header_path, body_path, ingested_at FROM books ORDER BY book_id ASC;";
-    sqlite3_stmt* stmt = nullptr;
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
-        sqlite3_close(db);
-        return results;
-    }
-
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        results.push_back(rowToMetadata(stmt));
-    }
-
-    sqlite3_finalize(stmt);
-    sqlite3_close(db);
-    return results;
+    return executeSelectQuery(
+        dbPath,
+        "SELECT book_id, title, author, language, header_path, body_path, ingested_at FROM books ORDER BY book_id ASC;",
+        nullptr
+    );
 }
 
 // Runs insertion and query performance benchmarks on SQLite.
