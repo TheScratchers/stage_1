@@ -4,13 +4,13 @@
 #include <sstream>
 #include <random>
 #include <algorithm>
-#include <filesystem>
 #include <chrono>
 #include <iomanip>
 #include <curl/curl.h>
 
 namespace fs = std::filesystem;
 
+// libcurl write callback to accumulate response into std::string.
 static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
     size_t totalSize = size * nmemb;
     std::string* s = static_cast<std::string*>(userp);
@@ -18,34 +18,57 @@ static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* use
     return totalSize;
 }
 
-ControlLayer::ControlLayer(const std::string& controlDir, const std::string& datalakeDir)
-    : controlPath(controlDir),
-      downloadedFile(controlDir + "/downloaded_books.txt"),
-      indexedFile(controlDir + "/indexed_books.txt"),
-      datalakePath(datalakeDir) {
-    fs::create_directories(controlPath);
-    fs::create_directories(datalakePath);
+void ControlLayer::resolvePaths(const std::string& controlDir, const std::string& datalakeDir, const std::string& datamartDir) {
+    if (!controlDir.empty() && !datalakeDir.empty() && !datamartDir.empty()) {
+        controlPath = fs::absolute(controlDir);
+        datalakePath = fs::absolute(datalakeDir);
+        datamartPath = fs::absolute(datamartDir);
+    } else {
+        // Automatically find project root by searching upwards for key landmark files
+        fs::path root = fs::current_path();
+        while (root.has_parent_path() && 
+               !fs::exists(root / "stage_1_building_data_layer.pdf") && 
+               !fs::exists(root / ".git")) {
+            root = root.parent_path();
+        }
+
+        controlPath = controlDir.empty() ? (root / "control") : fs::absolute(controlDir);
+        datalakePath = datalakeDir.empty() ? (root / "data" / "datalake") : fs::absolute(datalakeDir);
+        datamartPath = datamartDir.empty() ? (root / "data" / "datamarts") : fs::absolute(datamartDir);
+    }
+
+    downloadedFile = controlPath / "downloaded_books.txt";
+    indexedFile = controlPath / "indexed_books.txt";
+
+    std::error_code ec;
+    fs::create_directories(controlPath, ec);
+    fs::create_directories(datalakePath, ec);
+    fs::create_directories(datamartPath, ec);
 }
 
-std::unordered_set<int> ControlLayer::readIds(const std::string& filePath) {
+ControlLayer::ControlLayer(const std::string& controlDir,
+                           const std::string& datalakeDir,
+                           const std::string& datamartDir) {
+    resolvePaths(controlDir, datalakeDir, datamartDir);
+}
+
+std::unordered_set<int> ControlLayer::readIds(const fs::path& filePath) {
     std::unordered_set<int> ids;
     std::ifstream file(filePath);
-    if (!file.is_open()) {
-        return ids;
-    }
+    if (!file.is_open()) return ids;
+
     std::string line;
     while (std::getline(file, line)) {
         if (!line.empty()) {
             try {
                 ids.insert(std::stoi(line));
-            } catch (...) {
-            }
+            } catch (...) {}
         }
     }
     return ids;
 }
 
-void ControlLayer::appendId(const std::string& filePath, int bookId) {
+void ControlLayer::appendId(const fs::path& filePath, int bookId) {
     std::ofstream file(filePath, std::ios::app);
     if (file.is_open()) {
         file << bookId << "\n";
@@ -54,7 +77,7 @@ void ControlLayer::appendId(const std::string& filePath, int bookId) {
 
 bool ControlLayer::downloadBook(int bookId) {
     std::string url = "https://www.gutenberg.org/cache/epub/" + std::to_string(bookId) + "/pg" + std::to_string(bookId) + ".txt";
-    
+
     CURL* curl = curl_easy_init();
     if (!curl) {
         std::cerr << "[downloadBook] Failed to initialize CURL\n";
@@ -66,7 +89,7 @@ bool ControlLayer::downloadBook(int bookId) {
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseData);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 25L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "BigData-SearchEngine/1.0");
 
     CURLcode res = curl_easy_perform(curl);
@@ -75,7 +98,7 @@ bool ControlLayer::downloadBook(int bookId) {
     curl_easy_cleanup(curl);
 
     if (res != CURLE_OK || httpCode != 200) {
-        std::cerr << "[downloadBook] Failed to download book " << bookId << " (HTTP " << httpCode << ")\n";
+        std::cerr << "[downloadBook] Book " << bookId << " unavailable (HTTP " << httpCode << ")\n";
         return false;
     }
 
@@ -86,13 +109,11 @@ bool ControlLayer::downloadBook(int bookId) {
     size_t endPos = responseData.find(endMarker);
 
     if (startPos == std::string::npos || endPos == std::string::npos || endPos <= startPos) {
-        std::cerr << "[downloadBook] Gutenberg markers not found for book " << bookId << "\n";
+        std::cerr << "[downloadBook] Gutenberg markers missing for book " << bookId << "\n";
         return false;
     }
 
-    size_t headerEnd = startPos;
-    std::string header = responseData.substr(0, headerEnd);
-
+    std::string header = responseData.substr(0, startPos);
     size_t bodyStart = responseData.find('\n', startPos);
     if (bodyStart == std::string::npos || bodyStart >= endPos) {
         bodyStart = startPos + startMarker.length();
@@ -101,57 +122,69 @@ bool ControlLayer::downloadBook(int bookId) {
     }
     std::string body = responseData.substr(bodyStart, endPos - bodyStart);
 
-    // Time-based directory layout: datalake/YYYYMMDD/HH/
-    auto now = std::chrono::system_clock::now();
-    std::time_t now_c = std::chrono::system_clock::to_time_t(now);
-    std::tm tm_struct{};
-#if defined(_WIN32) || defined(_WIN64)
-    localtime_s(&tm_struct, &now_c);
-#else
-    localtime_r(&now_c, &tm_struct);
-#endif
+    return Datalake::saveBook(datalakePath, DatalakeLayout::TimeBased, bookId, header, body);
+}
 
-    std::ostringstream folderStream;
-    folderStream << datalakePath << "/"
-                 << std::put_time(&tm_struct, "%Y%m%d/%H");
-    
-    fs::path targetFolder = folderStream.str();
-    fs::create_directories(targetFolder);
-
-    fs::path headerPath = targetFolder / (std::to_string(bookId) + ".header.txt");
-    fs::path bodyPath = targetFolder / (std::to_string(bookId) + ".body.txt");
-
-    std::ofstream hFile(headerPath, std::ios::binary);
-    if (!hFile.is_open()) return false;
-    hFile.write(header.data(), header.size());
-
-    std::ofstream bFile(bodyPath, std::ios::binary);
-    if (!bFile.is_open()) return false;
-    bFile.write(body.data(), body.size());
-
-    return true;
+bool ControlLayer::ingestSampleBook(int bookId, const std::string& header, const std::string& body) {
+    bool saved = Datalake::saveBook(datalakePath, DatalakeLayout::TimeBased, bookId, header, body);
+    if (saved) {
+        appendId(downloadedFile, bookId);
+    }
+    return saved;
 }
 
 bool ControlLayer::indexBook(int bookId) {
-    // Check if book files exist in datalake
-    bool found = false;
-    for (const auto& entry : fs::recursive_directory_iterator(datalakePath)) {
-        if (entry.is_regular_file() && entry.path().filename() == (std::to_string(bookId) + ".body.txt")) {
-            found = true;
-            break;
-        }
-    }
-    if (!found) {
+    BookFiles files = Datalake::findBookRecursive(datalakePath, bookId);
+    if (!files.exists) {
         std::cerr << "[CONTROL] Could not locate files for book " << bookId << " in datalake.\n";
         return false;
     }
 
-    // Placeholder indexing step for Stage 1 (mirrors pipeline indexing)
-    std::cout << "[INDEXER] Indexed book " << bookId << " successfully.\n";
+    // 1. Read header and body
+    std::ifstream hStream(files.headerPath, std::ios::binary);
+    std::string headerText((std::istreambuf_iterator<char>(hStream)), std::istreambuf_iterator<char>());
+
+    std::ifstream bStream(files.bodyPath, std::ios::binary);
+    std::string bodyText((std::istreambuf_iterator<char>(bStream)), std::istreambuf_iterator<char>());
+
+    // 2. Parse metadata
+    BookMetadata meta = MetadataExtractor::parseHeader(bookId, headerText);
+    meta.headerPath = files.headerPath.string();
+    meta.bodyPath = files.bodyPath.string();
+
+    auto now = std::chrono::system_clock::now();
+    std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+    std::tm tmStruct{};
+#if defined(_WIN32) || defined(_WIN64)
+    localtime_s(&tmStruct, &now_c);
+#else
+    localtime_r(&now_c, &tmStruct);
+#endif
+    std::ostringstream timeStream;
+    timeStream << std::put_time(&tmStruct, "%Y-%m-%d %H:%M:%S");
+    meta.ingestedAt = timeStream.str();
+
+    // 3. Save metadata into SQLite database and CSV
+    fs::path dbPath = datamartPath / "metadata.db";
+    fs::path csvPath = datamartPath / "metadata.csv";
+    MetadataExtractor::saveToDatabase(meta, dbPath.string());
+    MetadataExtractor::saveToCsv(meta, csvPath.string());
+
+    // 4. Update the 3 Inverted Index structures
+    fs::path jsonPath = datamartPath / "inverted_index.json";
+    fs::path hierDir  = datamartPath / "inverted_index_hier";
+    fs::path binPath  = datamartPath / "inverted_index.bin";
+
+    InvertedIndex::updateMonolithicIndex(bookId, bodyText, jsonPath.string());
+    InvertedIndex::updateHierarchicalIndex(bookId, bodyText, hierDir.string());
+    InvertedIndex::updateBinaryIndex(bookId, bodyText, binPath.string());
+
+    std::cout << "[INDEXER] Successfully indexed book " << bookId 
+              << " (\"" << meta.title << "\" by " << meta.author << ") across all datamarts.\n";
     return true;
 }
 
-void ControlLayer::step() {
+bool ControlLayer::step() {
     auto downloaded = readIds(downloadedFile);
     auto indexed = readIds(indexedFile);
 
@@ -164,15 +197,18 @@ void ControlLayer::step() {
 
     if (!readyToIndex.empty()) {
         std::sort(readyToIndex.begin(), readyToIndex.end());
-        int bookId = readyToIndex[0];
-        std::cout << "[CONTROL] Indexing book " << bookId << "...\n";
+        int bookId = readyToIndex.front();
+        std::cout << "[CONTROL] Scheduling book " << bookId << " for indexing...\n";
         if (indexBook(bookId)) {
             appendId(indexedFile, bookId);
-            std::cout << "[CONTROL] Book " << bookId << " successfully indexed.\n";
+            std::cout << "[CONTROL] Book " << bookId << " marked as indexed.\n";
+            return true;
         } else {
-            std::cerr << "[CONTROL] Failed to index book " << bookId << ".\n";
+            std::cerr << "[CONTROL] Indexing failed for book " << bookId << ".\n";
+            return false;
         }
     } else {
+        // Pick random Gutenberg candidate not yet downloaded
         std::random_device rd;
         std::mt19937 gen(rd());
         std::uniform_int_distribution<> distrib(1, 70000);
@@ -180,21 +216,22 @@ void ControlLayer::step() {
         for (int attempt = 0; attempt < 10; ++attempt) {
             int candidateId = distrib(gen);
             if (downloaded.find(candidateId) == downloaded.end()) {
-                std::cout << "[CONTROL] Downloading new book with ID " << candidateId << "...\n";
+                std::cout << "[CONTROL] Attempting to download book ID " << candidateId << "...\n";
                 if (downloadBook(candidateId)) {
                     appendId(downloadedFile, candidateId);
-                    std::cout << "[CONTROL] Book " << candidateId << " successfully downloaded.\n";
-                } else {
-                    std::cerr << "[CONTROL] Failed to download book " << candidateId << ".\n";
+                    std::cout << "[CONTROL] Book " << candidateId << " downloaded into Datalake.\n";
+                    return true;
                 }
-                break;
             }
         }
+        std::cerr << "[CONTROL] No new book downloaded after retry attempts.\n";
+        return false;
     }
 }
 
 void ControlLayer::run(int steps) {
     for (int i = 0; i < steps; ++i) {
+        std::cout << "\n--- Pipeline Step " << (i + 1) << " / " << steps << " ---\n";
         step();
     }
 }
