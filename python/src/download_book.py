@@ -12,6 +12,8 @@ from pathlib import Path
 
 import requests
 
+# These are the exact marker lines Project Gutenberg inserts around the
+# actual book text, used to split header / body / footer apart.
 START_MARKER = "*** START OF THE PROJECT GUTENBERG EBOOK"
 END_MARKER = "*** END OF THE PROJECT GUTENBERG EBOOK"
 
@@ -27,6 +29,9 @@ def save_book(book_id: int, header: str, body: str, output_path: str) -> None:
     needing network access.
     """
     output_dir = Path(output_path)
+    # parents=True creates any missing parent directories too (e.g. the
+    # whole datalake/20260101/14/ chain); exist_ok=True means it's not
+    # an error if this directory was already created by a previous book.
     output_dir.mkdir(parents=True, exist_ok=True)
 
     body_path = output_dir / f"{book_id}.body.txt"
@@ -49,12 +54,19 @@ def download_book(book_id: int, output_path: str) -> bool:
     Returns True on success, False if the book could not be parsed
     (e.g. markers not found) or downloaded.
     """
+    # Every Gutenberg book follows this same URL pattern, built from
+    # its numeric id.
     url = f"https://www.gutenberg.org/cache/epub/{book_id}/pg{book_id}.txt"
 
     try:
         response = requests.get(url, timeout=30)
+        # Raises an exception for HTTP error status codes (404, 500...),
+        # so a failed download is caught below instead of silently
+        # treating an error page's HTML as if it were the book text.
         response.raise_for_status()
     except requests.RequestException as exc:
+        # Covers connection errors, timeouts, and the raise_for_status()
+        # above - any of these mean we don't have a usable response.
         print(f"[download_book] Failed to download book {book_id}: {exc}")
         return False
 
@@ -78,6 +90,9 @@ def download_book(book_id: int, output_path: str) -> bool:
 
 
 if __name__ == "__main__":
+    # Command-line entry point: `python download_book.py <book_id> <output_dir>`,
+    # falling back to sensible defaults so the script also works with no
+    # arguments at all (useful for a quick manual test).
     book_id = int(sys.argv[1]) if len(sys.argv) > 1 else 1342
     out_path = sys.argv[2] if len(sys.argv) > 2 else "data/output"
 
