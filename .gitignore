@@ -6,6 +6,8 @@
 data/datalake/
 data/datamarts/
 data/bench_*/
+!data/sample_books/
+!data/sample_books/*
 
 # ─── Control state files (runtime state, not source) ────────
 control/downloaded_books.txt
