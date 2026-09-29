@@ -7,110 +7,83 @@
 
 namespace fs = std::filesystem;
 
+static bool readHeader(std::ifstream& in, uint32_t& termCount, uint64_t& dictOffset) {
+    char magic[4]; uint8_t ver = 0;
+    if (!in.read(magic, 4) || std::memcmp(magic, "BIDX", 4) != 0) return false;
+    return in.read(reinterpret_cast<char*>(&ver), 1) &&
+           in.read(reinterpret_cast<char*>(&termCount), 4) &&
+           in.read(reinterpret_cast<char*>(&dictOffset), 8);
+}
+
 bool BinaryIndex::buildFromMap(const std::map<std::string, std::vector<int>>& indexMap, const std::string& binPath) {
     fs::path p(binPath);
-    if (p.has_parent_path()) {
-        std::error_code ec;
-        fs::create_directories(p.parent_path(), ec);
-    }
-
+    if (p.has_parent_path()) { std::error_code ec; fs::create_directories(p.parent_path(), ec); }
     std::ofstream out(binPath, std::ios::binary);
     if (!out.is_open()) return false;
 
-    // Header: Magic "BIDX" (4B), version 1 (1B), termCount (4B), dictOffset placeholder (8B)
     const char magic[4] = {'B', 'I', 'D', 'X'};
-    const uint8_t version = 1;
+    const uint8_t ver = 1;
     uint32_t termCount = static_cast<uint32_t>(indexMap.size());
-    uint64_t dictOffsetPlaceholder = 0;
+    uint64_t dictOffsetZero = 0;
 
     out.write(magic, 4);
-    out.write(reinterpret_cast<const char*>(&version), sizeof(version));
-    out.write(reinterpret_cast<const char*>(&termCount), sizeof(termCount));
-    out.write(reinterpret_cast<const char*>(&dictOffsetPlaceholder), sizeof(dictOffsetPlaceholder));
+    out.write(reinterpret_cast<const char*>(&ver), 1);
+    out.write(reinterpret_cast<const char*>(&termCount), 4);
+    out.write(reinterpret_cast<const char*>(&dictOffsetZero), 8);
 
-    // Postings section
-    struct DictRecord {
-        std::string term;
-        uint64_t offset;
-        uint32_t count;
-    };
-    std::vector<DictRecord> dictRecords;
-    dictRecords.reserve(termCount);
+    struct DictRec { std::string term; uint64_t off; uint32_t cnt; };
+    std::vector<DictRec> dict;
+    dict.reserve(termCount);
 
     for (const auto& [term, ids] : indexMap) {
-        uint64_t offset = static_cast<uint64_t>(out.tellp());
-        uint32_t count = static_cast<uint32_t>(ids.size());
-
+        dict.push_back({term, static_cast<uint64_t>(out.tellp()), static_cast<uint32_t>(ids.size())});
         for (int id : ids) {
             uint32_t uid = static_cast<uint32_t>(id);
-            out.write(reinterpret_cast<const char*>(&uid), sizeof(uid));
+            out.write(reinterpret_cast<const char*>(&uid), 4);
         }
-        dictRecords.push_back({term, offset, count});
     }
-
-    // Dictionary section
     uint64_t actualDictOffset = static_cast<uint64_t>(out.tellp());
-    for (const auto& r : dictRecords) {
+    for (const auto& r : dict) {
         uint16_t len = static_cast<uint16_t>(r.term.size());
-        out.write(reinterpret_cast<const char*>(&len), sizeof(len));
+        out.write(reinterpret_cast<const char*>(&len), 2);
         out.write(r.term.data(), len);
-        out.write(reinterpret_cast<const char*>(&r.offset), sizeof(r.offset));
-        out.write(reinterpret_cast<const char*>(&r.count), sizeof(r.count));
+        out.write(reinterpret_cast<const char*>(&r.off), 8);
+        out.write(reinterpret_cast<const char*>(&r.cnt), 4);
     }
-
-    // Patch dictOffset in header
-    out.seekp(4 + 1 + sizeof(uint32_t));
-    out.write(reinterpret_cast<const char*>(&actualDictOffset), sizeof(actualDictOffset));
-
+    out.seekp(4 + 1 + 4);
+    out.write(reinterpret_cast<const char*>(&actualDictOffset), 8);
     return true;
 }
 
 std::map<std::string, std::vector<int>> BinaryIndex::load(const std::string& binPath) {
     std::map<std::string, std::vector<int>> index;
     if (!fs::exists(binPath)) return index;
-
     std::ifstream in(binPath, std::ios::binary);
-    if (!in.is_open()) return index;
-
-    char magic[4];
-    in.read(magic, 4);
-    if (std::memcmp(magic, "BIDX", 4) != 0) return index;
-
-    uint8_t version = 0;
-    uint32_t termCount = 0;
-    uint64_t dictOffset = 0;
-    in.read(reinterpret_cast<char*>(&version), sizeof(version));
-    in.read(reinterpret_cast<char*>(&termCount), sizeof(termCount));
-    in.read(reinterpret_cast<char*>(&dictOffset), sizeof(dictOffset));
+    uint32_t termCount = 0; uint64_t dictOffset = 0;
+    if (!in.is_open() || !readHeader(in, termCount, dictOffset)) return index;
 
     in.seekg(dictOffset);
-    struct Entry { std::string term; uint64_t offset; uint32_t count; };
-    std::vector<Entry> entries;
-    entries.reserve(termCount);
-
+    struct Entry { std::string term; uint64_t off; uint32_t cnt; };
+    std::vector<Entry> entries(termCount);
     for (uint32_t i = 0; i < termCount; ++i) {
         uint16_t len = 0;
-        in.read(reinterpret_cast<char*>(&len), sizeof(len));
-        std::string term(len, '\0');
-        in.read(&term[0], len);
-        uint64_t off = 0; uint32_t cnt = 0;
-        in.read(reinterpret_cast<char*>(&off), sizeof(off));
-        in.read(reinterpret_cast<char*>(&cnt), sizeof(cnt));
-        entries.push_back({term, off, cnt});
+        in.read(reinterpret_cast<char*>(&len), 2);
+        entries[i].term.resize(len);
+        in.read(&entries[i].term[0], len);
+        in.read(reinterpret_cast<char*>(&entries[i].off), 8);
+        in.read(reinterpret_cast<char*>(&entries[i].cnt), 4);
     }
-
     for (const auto& e : entries) {
         in.clear();
-        in.seekg(e.offset);
-        std::vector<int> ids(e.count);
-        for (uint32_t c = 0; c < e.count; ++c) {
+        in.seekg(e.off);
+        std::vector<int> ids(e.cnt);
+        for (uint32_t c = 0; c < e.cnt; ++c) {
             uint32_t uid = 0;
-            in.read(reinterpret_cast<char*>(&uid), sizeof(uid));
+            in.read(reinterpret_cast<char*>(&uid), 4);
             ids[c] = static_cast<int>(uid);
         }
         index[e.term] = std::move(ids);
     }
-
     return index;
 }
 
@@ -129,52 +102,31 @@ bool BinaryIndex::update(int bookId, const std::string& bodyText, const std::str
 std::vector<int> BinaryIndex::search(const std::string& term, const std::string& binPath) {
     std::string lower = Tokenizer::toLower(term);
     if (lower.empty() || !fs::exists(binPath)) return {};
-
     std::ifstream in(binPath, std::ios::binary);
-    if (!in.is_open()) return {};
-
-    char magic[4];
-    in.read(magic, 4);
-    if (std::memcmp(magic, "BIDX", 4) != 0) return {};
-
-    uint8_t version = 0;
-    uint32_t termCount = 0;
-    uint64_t dictOffset = 0;
-    in.read(reinterpret_cast<char*>(&version), sizeof(version));
-    in.read(reinterpret_cast<char*>(&termCount), sizeof(termCount));
-    in.read(reinterpret_cast<char*>(&dictOffset), sizeof(dictOffset));
+    uint32_t termCount = 0; uint64_t dictOffset = 0;
+    if (!in.is_open() || !readHeader(in, termCount, dictOffset)) return {};
 
     in.seekg(dictOffset);
-    uint64_t matchedOffset = 0;
-    uint32_t matchedCount = 0;
-    bool found = false;
-
     for (uint32_t i = 0; i < termCount; ++i) {
         uint16_t len = 0;
-        in.read(reinterpret_cast<char*>(&len), sizeof(len));
-        std::string currentTerm(len, '\0');
-        in.read(&currentTerm[0], len);
+        in.read(reinterpret_cast<char*>(&len), 2);
+        std::string cur(len, '\0');
+        in.read(&cur[0], len);
         uint64_t off = 0; uint32_t cnt = 0;
-        in.read(reinterpret_cast<char*>(&off), sizeof(off));
-        in.read(reinterpret_cast<char*>(&cnt), sizeof(cnt));
+        in.read(reinterpret_cast<char*>(&off), 8);
+        in.read(reinterpret_cast<char*>(&cnt), 4);
 
-        if (currentTerm == lower) {
-            matchedOffset = off;
-            matchedCount = cnt;
-            found = true;
-            break;
+        if (cur == lower) {
+            in.clear();
+            in.seekg(off);
+            std::vector<int> res(cnt);
+            for (uint32_t c = 0; c < cnt; ++c) {
+                uint32_t uid = 0;
+                in.read(reinterpret_cast<char*>(&uid), 4);
+                res[c] = static_cast<int>(uid);
+            }
+            return res;
         }
     }
-
-    if (!found || matchedCount == 0) return {};
-
-    in.clear();
-    in.seekg(matchedOffset);
-    std::vector<int> results(matchedCount);
-    for (uint32_t i = 0; i < matchedCount; ++i) {
-        uint32_t uid = 0;
-        in.read(reinterpret_cast<char*>(&uid), sizeof(uid));
-        results[i] = static_cast<int>(uid);
-    }
-    return results;
+    return {};
 }
