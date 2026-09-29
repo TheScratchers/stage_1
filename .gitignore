@@ -5,6 +5,7 @@
 # ─── Datalake & Data directories (large runtime data) ───────
 data/datalake/
 data/datamarts/
+data/bench_*/
 
 # ─── Control state files (runtime state, not source) ────────
 control/downloaded_books.txt

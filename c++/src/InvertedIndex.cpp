@@ -646,5 +646,8 @@ std::vector<IndexBenchmarkResult> InvertedIndex::runBenchmark(
         }
     }
 
+    // Clean up temporary benchmark directory
+    fs::remove_all(benchDir, ec);
+
     return results;
 }

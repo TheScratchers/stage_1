@@ -212,6 +212,7 @@ std::vector<DatalakeBenchmarkResult> Datalake::runBenchmark(
                 }
             }
         }
+        (void)totalBytesRead;
         auto tEndLookup = std::chrono::high_resolution_clock::now();
         res.lookupSeconds = std::chrono::duration<double>(tEndLookup - tStartLookup).count();
         res.lookupAvgMs = (res.lookupSamples > 0) ? ((res.lookupSeconds / res.lookupSamples) * 1000.0) : 0.0;
