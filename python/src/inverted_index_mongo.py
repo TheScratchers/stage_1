@@ -30,14 +30,21 @@ from pathlib import Path
 from pymongo import MongoClient, ASCENDING
 
 TOKEN_PATTERN = re.compile(r"[A-Za-z]+")
+# Default connection string for a MongoDB instance running locally
+# (e.g. via the docker command above), used whenever the caller
+# doesn't pass a different uri.
 DEFAULT_URI = "mongodb://localhost:27017/"
 
 
 def tokenize(text: str) -> list:
+    # .lower() first so "The" and "the" are treated as the same term;
+    # findall() then returns every run of letters as a separate word.
     return TOKEN_PATTERN.findall(text.lower())
 
 
 def get_collection(uri: str = DEFAULT_URI, db_name: str = "stage1", collection_name: str = "inverted_index"):
+    # Opens (or reuses) a connection to the MongoDB server and returns
+    # the specific collection ("table") this module stores terms in.
     client = MongoClient(uri, serverSelectionTimeoutMS=5000)
     collection = client[db_name][collection_name]
     # unique=True both speeds up search() (an index-backed lookup
@@ -52,8 +59,12 @@ def build_index(datalake_dir: str, uri: str = DEFAULT_URI) -> int:
     Scans the datalake and rebuilds the inverted index from scratch
     in MongoDB. Returns the number of unique terms stored.
     """
+    # First pass: build the whole index in memory (one set of book_ids
+    # per term), the same way build_index() does in inverted_index.py.
     postings = defaultdict(set)
     for body_file in sorted(Path(datalake_dir).rglob("*.body.txt")):
+        # The book_id is the part of the filename before the first
+        # "." (e.g. "1342.body.txt" -> "1342" -> 1342).
         book_id = int(body_file.name.split(".")[0])
         text = body_file.read_text(encoding="utf-8")
         for term in set(tokenize(text)):
@@ -62,6 +73,8 @@ def build_index(datalake_dir: str, uri: str = DEFAULT_URI) -> int:
     client, collection = get_collection(uri)
     try:
         collection.delete_many({})  # clean rebuild
+        # Build one document per term up front, then send them all to
+        # MongoDB in a single call (see the note on insert_many below).
         docs = [{"term": term, "postings": sorted(ids)} for term, ids in postings.items()]
         if docs:
             # insert_many batches all documents into one round trip to
@@ -69,12 +82,17 @@ def build_index(datalake_dir: str, uri: str = DEFAULT_URI) -> int:
             collection.insert_many(docs)
         return len(docs)
     finally:
+        # Always close the connection, even if insert_many() raised an
+        # error above.
         client.close()
 
 
 def search(term: str, uri: str = DEFAULT_URI) -> list:
     client, collection = get_collection(uri)
     try:
+        # find_one() returns the single matching document (or None),
+        # since `term` is unique per the index created in
+        # get_collection().
         doc = collection.find_one({"term": term.lower()})
         return doc["postings"] if doc else []
     finally:
@@ -103,6 +121,9 @@ def update_index(book_id: int, body_text: str, uri: str = DEFAULT_URI) -> None:
 
 
 if __name__ == "__main__":
+    # Command-line entry point: `python inverted_index_mongo.py <datalake_dir> <uri>`,
+    # falling back to sensible defaults so the script also works with no
+    # arguments at all.
     datalake_dir = sys.argv[1] if len(sys.argv) > 1 else "datalake"
     uri = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_URI
 

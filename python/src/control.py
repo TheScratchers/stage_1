@@ -21,6 +21,8 @@ from metadata import init_db, upsert_book, parse_header
 from inverted_index import load_index, save_index, update_index as update_json_index
 from inverted_index_hierarchical import update_index as update_hier_index
 
+# Folder + file paths for the two plain-text state files this module
+# reads and writes.
 CONTROL_PATH = Path("control")
 DOWNLOADED = CONTROL_PATH / "downloaded_books.txt"
 INDEXED = CONTROL_PATH / "indexed_books.txt"
@@ -37,13 +39,20 @@ DATALAKE_DIR = "datalake"
 
 
 def _read_ids(path: Path) -> set:
+    # No file yet means no ids recorded yet - return an empty set
+    # instead of erroring.
     if not path.exists():
         return set()
+    # One book_id per line; splitlines() drops the file's trailing
+    # newline, and the "if x.strip()" guard skips any blank lines.
     return {int(x) for x in path.read_text(encoding="utf-8").splitlines() if x.strip()}
 
 
 def _append_id(path: Path, book_id: int) -> None:
+    # Make sure the control/ folder exists before writing into it.
     path.parent.mkdir(parents=True, exist_ok=True)
+    # "a" (append mode) adds this id as a new line without touching
+    # any ids already recorded in the file.
     with open(path, "a", encoding="utf-8") as f:
         f.write(f"{book_id}\n")
 
@@ -59,8 +68,13 @@ def _find_book_files(book_id: int, datalake_dir: str = DATALAKE_DIR):
     """
     body_matches = list(Path(datalake_dir).rglob(f"{book_id}.body.txt"))
     header_matches = list(Path(datalake_dir).rglob(f"{book_id}.header.txt"))
+    # Either file missing means the book isn't actually in the
+    # datalake (or is only half-written) - report "not found" rather
+    # than crashing on a missing index [0] below.
     if not body_matches or not header_matches:
         return None, None
+    # Just take the first match - book_ids are expected to be unique
+    # across the datalake, so there should only ever be one.
     return body_matches[0], header_matches[0]
 
 
@@ -75,6 +89,9 @@ def index_book(book_id: int) -> bool:
         print(f"[CONTROL] Could not locate files for book {book_id} in the datalake.")
         return False
 
+    # Metadata: make sure the SQLite table exists, parse the header
+    # text, and read the body text once so it can be reused by both
+    # inverted-index updates below without reading the file twice.
     init_db(DB_PATH)
     meta = parse_header(header_file.read_text(encoding="utf-8"))
     body_text = body_file.read_text(encoding="utf-8")
@@ -107,10 +124,13 @@ def control_pipeline_step() -> None:
       2. Otherwise, download a new book, skipping ids already downloaded.
       3. Update the control files to reflect what happened.
     """
+    # Make sure the control/ folder exists before this step tries to
+    # read or write its state files.
     CONTROL_PATH.mkdir(parents=True, exist_ok=True)
 
     downloaded = _read_ids(DOWNLOADED)
     indexed = _read_ids(INDEXED)
+    # Set difference: ids that are downloaded but not yet indexed.
     ready_to_index = downloaded - indexed
 
     if ready_to_index:
@@ -118,9 +138,13 @@ def control_pipeline_step() -> None:
         # inverted indexes) caught up with whatever is already in the
         # datalake, instead of piling up an ever-growing backlog of
         # downloaded-but-unindexed books.
+        # sorted(...)[0] picks the smallest pending id, so books are
+        # processed in a stable, predictable order.
         book_id = sorted(ready_to_index)[0]
         print(f"[CONTROL] Indexing book {book_id}...")
         if index_book(book_id):
+            # Only mark the book as indexed once index_book() actually
+            # succeeded.
             _append_id(INDEXED, book_id)
             print(f"[CONTROL] Book {book_id} successfully indexed.")
         else:
@@ -132,6 +156,8 @@ def control_pipeline_step() -> None:
         # network calls in a row.
         for _ in range(10):
             candidate_id = random.randint(1, TOTAL_BOOKS)
+            # Skip ids we've already downloaded, so a step never
+            # re-downloads the same book twice.
             if candidate_id not in downloaded:
                 print(f"[CONTROL] Downloading new book with ID {candidate_id}...")
                 if ingest_book(candidate_id, DATALAKE_DIR):
@@ -139,10 +165,14 @@ def control_pipeline_step() -> None:
                     print(f"[CONTROL] Book {candidate_id} successfully downloaded.")
                 else:
                     print(f"[CONTROL] Failed to download book {candidate_id}.")
+                # Stop after the first candidate we actually attempt,
+                # whether it succeeded or not - one step, one attempt.
                 break
 
 
 if __name__ == "__main__":
+    # Command-line entry point: `python control.py <steps>` runs that
+    # many coordination steps in a row; with no arguments, runs just 1.
     steps = int(sys.argv[1]) if len(sys.argv) > 1 else 1
     for _ in range(steps):
         control_pipeline_step()

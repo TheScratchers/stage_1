@@ -34,8 +34,12 @@ from datalake import time_based_path
 from datalake_book import book_based_path
 from datalake_batch import batch_based_path
 
+# Where the 3 real books already live, and which ids they are.
 REAL_BOOKS_DIR = Path("datalake/20260917/18")
 REAL_BOOK_IDS = [5, 11, 1342]
+# Scratch folder for everything this benchmark creates - kept separate
+# from the real datalake/, datalake_book/ and datalake_batch/ folders
+# so we never mix synthetic and real data.
 BENCH_ROOT = Path("bench_data")
 N_LOOKUPS = 200
 
@@ -43,6 +47,8 @@ N_LOOKUPS = 200
 def load_real_content():
     """Loads header/body text for the 3 real books already in the datalake."""
     content = {}
+    # Read each real book's header and body once up front, so the
+    # write-throughput loop below only has to do in-memory work.
     for book_id in REAL_BOOK_IDS:
         header = (REAL_BOOKS_DIR / f"{book_id}.header.txt").read_text(encoding="utf-8")
         body = (REAL_BOOKS_DIR / f"{book_id}.body.txt").read_text(encoding="utf-8")
@@ -52,18 +58,28 @@ def load_real_content():
 
 def make_synthetic_ids(n_books: int, start_id: int = 100000):
     """Synthetic book_ids that don't collide with real Gutenberg ids."""
+    # start_id=100000 is well above any real Gutenberg id we use, so
+    # these synthetic ids can never be confused with real ones.
     return list(range(start_id, start_id + n_books))
 
 
 def count_dirs_and_depth(root: Path):
     """Returns (num_dirs, max_depth, files_per_dir) for a directory tree."""
+    # Nothing was written (e.g. this structure wasn't benchmarked) -
+    # return all-zero/empty results instead of erroring on a missing path.
     if not root.exists():
         return 0, 0, []
+    # rglob("*") walks every file and folder recursively; is_dir()
+    # filters that down to just the directories, for the total count.
     dirs = [p for p in root.rglob("*") if p.is_dir()]
+    # Count how many *.body.txt files ended up in each parent
+    # directory, to later compute avg/max files per directory.
     files_per_dir = {}
     for f in root.rglob("*.body.txt"):
         files_per_dir.setdefault(f.parent, 0)
         files_per_dir[f.parent] += 1
+    # The deepest path (in path segments relative to root) tells us
+    # how many nested folder levels this structure created.
     max_depth = 0
     for p in root.rglob("*"):
         depth = len(p.relative_to(root).parts)
@@ -78,6 +94,9 @@ def benchmark_structure(name: str, path_fn, book_ids, content_by_real_id):
     storage overhead for the resulting tree.
     """
     base_dir = BENCH_ROOT / name
+    # Start from a clean, empty directory each time this benchmark
+    # runs, so results aren't skewed by files left over from a
+    # previous run.
     if base_dir.exists():
         shutil.rmtree(base_dir)
     base_dir.mkdir(parents=True)
@@ -98,6 +117,8 @@ def benchmark_structure(name: str, path_fn, book_ids, content_by_real_id):
     t0 = time.perf_counter()
     bytes_read = 0
     for book_id in sample_ids:
+        # Recompute the path the same way a real "find this book"
+        # lookup would - no caching, so this measures the true cost.
         out_dir = path_fn(str(base_dir), book_id)
         body_path = Path(out_dir) / f"{book_id}.body.txt"
         bytes_read += len(body_path.read_text(encoding="utf-8"))
@@ -105,9 +126,13 @@ def benchmark_structure(name: str, path_fn, book_ids, content_by_real_id):
 
     # 3. Storage overhead
     num_dirs, max_depth, files_per_dir = count_dirs_and_depth(base_dir)
+    # Guard against an empty files_per_dir list (division by zero) if
+    # somehow no files were written.
     avg_files_per_dir = (sum(files_per_dir) / len(files_per_dir)) if files_per_dir else 0
     max_files_per_dir = max(files_per_dir) if files_per_dir else 0
 
+    # Package every measurement into one dict, ready to print and to
+    # serialize as JSON.
     return {
         "structure": name,
         "n_books": len(book_ids),
@@ -124,6 +149,9 @@ def benchmark_structure(name: str, path_fn, book_ids, content_by_real_id):
 
 
 def main():
+    # n_books can be overridden from the command line: `python
+    # benchmark_datalake.py 500`; a fixed random seed makes the
+    # lookup sample (and therefore the results) reproducible.
     n_books = int(sys.argv[1]) if len(sys.argv) > 1 else 2000
     random.seed(42)
 
@@ -133,6 +161,8 @@ def main():
     book_ids = make_synthetic_ids(n_books)
     print(f"Benchmarking {n_books} synthetic books across 3 datalake structures...\n")
 
+    # Run the same benchmark once per structure, passing in each
+    # structure's own path-resolving function.
     results = []
     # time_based_path() ignores book_id (every book ingested in the
     # same hour lands in the same directory) - the lambda just adapts
@@ -142,6 +172,8 @@ def main():
     results.append(benchmark_structure("book_based", book_based_path, book_ids, content_by_real_id))
     results.append(benchmark_structure("batch_based", batch_based_path, book_ids, content_by_real_id))
 
+    # Print a simple fixed-width table so the comparison is readable
+    # straight from the terminal.
     header = f"{'Structure':<14}{'Write (s)':<12}{'Books/s':<10}{'Lookup avg (ms)':<18}{'#Dirs':<8}{'MaxDepth':<10}{'AvgFiles/Dir':<14}{'MaxFiles/Dir':<12}"
     print(header)
     print("-" * len(header))
@@ -152,6 +184,8 @@ def main():
             f"{r['avg_files_per_dir']:<14}{r['max_files_per_dir']:<12}"
         )
 
+    # Persist the raw numbers too, so they can be referenced later
+    # (e.g. in the written report) without re-running the benchmark.
     out_path = Path("datamarts/benchmark_datalake_results.json")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
