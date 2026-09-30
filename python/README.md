@@ -125,6 +125,22 @@ python src/benchmark_inverted_index.py --mongo [n_books] [mongo_uri] [book_ids_c
 Adds the MongoDB structure to the same results file. Requires a
 running MongoDB instance (see the Docker command above).
 
+## Tests
+
+A pytest suite covers the core logic of every module (path/structure
+computations, header parsing, index build/search/update, and the
+control layer's decision logic) using temporary directories and
+mocks - no network access or MongoDB needed.
+
+```
+pip install pytest
+python -m pytest tests/ -v
+```
+
+The MongoDB structure (`inverted_index_mongo.py`) isn't covered here
+since it needs a live database; it's exercised manually via the
+`--mongo` benchmark instead.
+
 ## Quick end-to-end example
 
 ```
