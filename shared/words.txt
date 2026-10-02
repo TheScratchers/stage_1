@@ -1,0 +1,41 @@
+# Stage 1 - Shared query workload: 10 fixed search terms used
+# identically by all 3 languages' inverted-index benchmarks
+# (query performance, update performance, etc.), so the "query
+# workload" is comparable across languages as required by the
+# project spec (Section 4.2). See CONTRACT.md for the full rules.
+#
+# Deliberately split across 3 frequency tiers so the benchmark
+# actually stresses the index structures differently, instead of
+# all 10 words behaving the same way:
+#
+#   common (expected in most of the 20 books): time, love, heart, nothing
+#   medium (recurring theme, not universal):    death, truth, fortune, monster
+#   rare   (tied to one specific book's plot
+#           or characters):                     wonderland, darcy
+#
+# "wonderland" is expected to appear almost only in book 11 (Alice's
+# Adventures in Wonderland). "darcy" is expected to appear almost only
+# in book 1342 (Pride and Prejudice, Mr. Darcy) - note "monster" is
+# kept in the medium tier rather than rare because Frankenstein's
+# creature is referred to this way repeatedly throughout that book.
+#
+# NOTE: these tiers are a best-effort assignment based on the books'
+# known content, not yet a measured frequency count. Once all 20
+# books are actually downloaded and indexed, do a quick sanity check
+# (count how many of the 20 books contain each term) and swap any
+# word that doesn't land in the tier expected.
+#
+# Format: one lowercase word per line. Blank lines and lines starting
+# with "#" are comments and must be ignored by parsers. Every
+# language's tokenizer must lowercase its input (see CONTRACT.md), so
+# these match regardless of case in the source text.
+time
+love
+heart
+nothing
+death
+truth
+fortune
+monster
+wonderland
+darcy
