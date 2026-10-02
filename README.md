@@ -159,8 +159,16 @@ cd java
 
 ```bash
 cd python
-# Instructions will be added during ft/python-setup
+pip install -r requirements.txt
+python src/datalake.py 1342 5 11
+python src/metadata.py
+python src/inverted_index.py
 ```
+
+**Requirements:** Python 3.9+. Full setup, all commands (including the
+other datalake/inverted-index structures, the control layer and the
+benchmarks) and Docker instructions for the MongoDB structure are in
+[`python/README.md`](python/README.md).
 
 ---
 

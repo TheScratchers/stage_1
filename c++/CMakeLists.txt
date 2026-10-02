@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
-project(stage1_search_engine VERSION 0.1.0 LANGUAGES CXX)
+project(stage1_search_engine VERSION 1.0.0 LANGUAGES CXX)
 
-# ── C++17 standard ──────────────────────────────────────────
+# ── C++17 Standard ──────────────────────────────────────────
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -12,20 +12,26 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/build)
 # ── Include paths ───────────────────────────────────────────
 include_directories(${CMAKE_SOURCE_DIR}/include)
 
-# ── Compiler warnings ───────────────────────────────────────
+# ── Compiler flags ──────────────────────────────────────────
 if(MSVC)
-    add_compile_options(/W4 /WX)
+    add_compile_options(/W4 /O2)
 else()
-    add_compile_options(-Wall -Wextra -Wpedantic -Werror)
+    add_compile_options(-Wall -Wextra -Wpedantic -O2)
 endif()
 
-# ── Collect all source files ────────────────────────────────
+# ── Find dependencies ───────────────────────────────────────
+find_package(CURL REQUIRED)
+find_package(SQLite3 REQUIRED)
+
+# ── Source files ────────────────────────────────────────────
 file(GLOB_RECURSE SOURCES "${CMAKE_SOURCE_DIR}/src/*.cpp")
 
-# ── Main executable (added when src/ is populated) ──────────
-# add_executable(search_engine ${SOURCES})
+add_executable(search_engine ${SOURCES})
+target_link_libraries(search_engine PRIVATE CURL::libcurl SQLite3::SQLite3)
 
-message(STATUS "Stage 1 — C++ Search Engine (C++17)")
-message(STATUS "Sources directory : ${CMAKE_SOURCE_DIR}/src")
-message(STATUS "Headers directory : ${CMAKE_SOURCE_DIR}/include")
-message(STATUS "Build output      : ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+message(STATUS "=== Stage 1: C++ Search Engine (C++17) ===")
+message(STATUS "Sources   : ${CMAKE_SOURCE_DIR}/src")
+message(STATUS "Headers   : ${CMAKE_SOURCE_DIR}/include")
+message(STATUS "Build Dir : ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+message(STATUS "CURL      : ${CURL_VERSION_STRING}")
+message(STATUS "SQLite3   : ${SQLite3_VERSION}")

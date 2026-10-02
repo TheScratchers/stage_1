@@ -1,0 +1,26 @@
+{
+  "json_monolithic": {
+    "structure": "json_monolithic",
+    "n_terms": 8070,
+    "build_seconds": 1.7943,
+    "cold_load_seconds": 0.0307,
+    "in_memory_lookup_avg_ms": 0.00022,
+    "num_files": 1,
+    "total_size_bytes": 1486908
+  },
+  "hierarchical": {
+    "structure": "hierarchical",
+    "n_terms": 8070,
+    "build_seconds": 110.2461,
+    "avg_lookup_ms": 9.80439,
+    "num_files": 8070,
+    "num_dirs": 26,
+    "total_size_bytes": 1198534
+  },
+  "mongodb": {
+    "structure": "mongodb",
+    "n_terms": 8070,
+    "build_seconds": 4.06,
+    "avg_lookup_ms": 24.1621
+  }
+}
