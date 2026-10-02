@@ -2,21 +2,29 @@
 Stage 1 - Benchmark: comparing the 3 datalake storage structures
 (time-based, book-based, batch-based) implemented in Python.
 
-Metrics measured for each structure:
+Uses the shared cross-language contract (../shared/CONTRACT.md,
+books.txt): the same 20 real books and the same 3 synthetic scales
+that Java and C++ must also use, so results are comparable across
+languages (see shared_contract.py for how these are loaded).
+
+Metrics measured for each structure, at each scale:
   1. Write throughput  -> time to ingest N books (seconds, books/sec)
   2. Lookup cost        -> time to locate + read a sample of book_ids
   3. Storage overhead   -> number of directories created, avg files/dir,
                            max directory depth
+  4. Scalability        -> the trend across the 3 contract scales
 
-To avoid depending on network access (Project Gutenberg is unreachable
-from this environment), we reuse the real header/body text of the 3
-books already downloaded into datalake/ (5, 11, 1342) and replicate
+To avoid depending on network access at benchmark time, we reuse the
+real header/body text of the 20 contract books already downloaded
+into datalake_shared/ (see download_shared_dataset.py) and replicate
 that content across many synthetic book_ids. This keeps the content
 "real" (actual book text, actual sizes) while letting us simulate
-volumes far beyond what we've manually downloaded.
+volumes far beyond the 20 books we actually have.
 
 Usage:
-    python benchmark_datalake.py [n_books]
+    python benchmark_datalake.py [scales_csv]
+        Default scales_csv = "1000,10000,100000" (the contract's 3
+        scales). Example: python benchmark_datalake.py 500,5000
 
 Results are printed to stdout and also written as JSON to
 datamarts/benchmark_datalake_results.json
@@ -34,9 +42,11 @@ from datalake import time_based_path
 from datalake_book import book_based_path
 from datalake_batch import batch_based_path
 
-# Where the 3 real books already live, and which ids they are.
-REAL_BOOKS_DIR = Path("datalake/20260917/18")
-REAL_BOOK_IDS = [5, 11, 1342]
+from shared_contract import load_book_ids
+
+# Where the 20 contract books already live (see download_shared_dataset.py).
+REAL_BOOKS_DIR = Path("datalake_shared")
+REAL_BOOK_IDS = load_book_ids()
 # Scratch folder for everything this benchmark creates - kept separate
 # from the real datalake/, datalake_book/ and datalake_batch/ folders
 # so we never mix synthetic and real data.
@@ -45,7 +55,7 @@ N_LOOKUPS = 200
 
 
 def load_real_content():
-    """Loads header/body text for the 3 real books already in the datalake."""
+    """Loads header/body text for the 20 contract books."""
     content = {}
     # Read each real book's header and body once up front, so the
     # write-throughput loop below only has to do in-memory work.
@@ -104,8 +114,8 @@ def benchmark_structure(name: str, path_fn, book_ids, content_by_real_id):
     # 1. Write throughput
     t0 = time.perf_counter()
     for book_id in book_ids:
-        # Cycle through the 3 real books so every synthetic id gets
-        # genuine header/body content instead of empty/dummy text.
+        # Cycle through the 20 contract books so every synthetic id
+        # gets genuine header/body content instead of empty/dummy text.
         real_id = REAL_BOOK_IDS[book_id % len(REAL_BOOK_IDS)]
         header, body = content_by_real_id[real_id]
         out_dir = path_fn(str(base_dir), book_id)
@@ -148,32 +158,10 @@ def benchmark_structure(name: str, path_fn, book_ids, content_by_real_id):
     }
 
 
-def main():
-    # n_books can be overridden from the command line: `python
-    # benchmark_datalake.py 500`; a fixed random seed makes the
-    # lookup sample (and therefore the results) reproducible.
-    n_books = int(sys.argv[1]) if len(sys.argv) > 1 else 2000
-    random.seed(42)
-
-    print(f"Loading real content from {REAL_BOOKS_DIR} (books {REAL_BOOK_IDS})...")
-    content_by_real_id = load_real_content()
-
-    book_ids = make_synthetic_ids(n_books)
-    print(f"Benchmarking {n_books} synthetic books across 3 datalake structures...\n")
-
-    # Run the same benchmark once per structure, passing in each
-    # structure's own path-resolving function.
-    results = []
-    # time_based_path() ignores book_id (every book ingested in the
-    # same hour lands in the same directory) - the lambda just adapts
-    # it to the same path_fn(base_dir, book_id) signature as the other
-    # two structures below.
-    results.append(benchmark_structure("time_based", lambda b, i: time_based_path(b), book_ids, content_by_real_id))
-    results.append(benchmark_structure("book_based", book_based_path, book_ids, content_by_real_id))
-    results.append(benchmark_structure("batch_based", batch_based_path, book_ids, content_by_real_id))
-
-    # Print a simple fixed-width table so the comparison is readable
-    # straight from the terminal.
+def print_table(scale: int, results: list):
+    # Simple fixed-width table so the comparison is readable straight
+    # from the terminal, printed once per scale.
+    print(f"\n--- {scale} books ---")
     header = f"{'Structure':<14}{'Write (s)':<12}{'Books/s':<10}{'Lookup avg (ms)':<18}{'#Dirs':<8}{'MaxDepth':<10}{'AvgFiles/Dir':<14}{'MaxFiles/Dir':<12}"
     print(header)
     print("-" * len(header))
@@ -184,12 +172,43 @@ def main():
             f"{r['avg_files_per_dir']:<14}{r['max_files_per_dir']:<12}"
         )
 
+
+def main():
+    # scales can be overridden from the command line: `python
+    # benchmark_datalake.py 500,5000`; a fixed random seed makes the
+    # lookup sample (and therefore the results) reproducible.
+    scales_csv = sys.argv[1] if len(sys.argv) > 1 else "1000,10000,100000"
+    scales = [int(x) for x in scales_csv.split(",") if x.strip()]
+    random.seed(42)
+
+    print(f"Loading real content from {REAL_BOOKS_DIR} ({len(REAL_BOOK_IDS)} contract books)...")
+    content_by_real_id = load_real_content()
+
+    # Run the full 3-structure comparison once per contract scale, so
+    # a single invocation produces the whole scalability picture.
+    results_by_scale = {}
+    for n_books in scales:
+        print(f"\n=== Benchmarking {n_books} synthetic books across 3 datalake structures ===")
+        book_ids = make_synthetic_ids(n_books)
+
+        results = []
+        # time_based_path() ignores book_id (every book ingested in the
+        # same hour lands in the same directory) - the lambda just adapts
+        # it to the same path_fn(base_dir, book_id) signature as the other
+        # two structures below.
+        results.append(benchmark_structure("time_based", lambda b, i: time_based_path(b), book_ids, content_by_real_id))
+        results.append(benchmark_structure("book_based", book_based_path, book_ids, content_by_real_id))
+        results.append(benchmark_structure("batch_based", batch_based_path, book_ids, content_by_real_id))
+
+        print_table(n_books, results)
+        results_by_scale[str(n_books)] = results
+
     # Persist the raw numbers too, so they can be referenced later
     # (e.g. in the written report) without re-running the benchmark.
     out_path = Path("datamarts/benchmark_datalake_results.json")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump({"n_books": n_books, "results": results}, f, indent=2)
+        json.dump({"scales": scales, "results_by_scale": results_by_scale}, f, indent=2)
     print(f"\nResults written to {out_path}")
 
     # Cleanup the benchmark data (it's synthetic, no need to keep it around)

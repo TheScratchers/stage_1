@@ -3,16 +3,23 @@ Stage 1 - Benchmark: comparing the 3 inverted index structures
 (monolithic JSON, hierarchical folder-per-letter/file-per-term, and
 MongoDB) implemented in Python.
 
-Like benchmark_datalake.py, this reuses the real header/body text of
-the 3 books already downloaded (5, 11, 1342), replicated across many
-synthetic book_ids, so we get a realistic vocabulary without depending
-on network access.
+Uses the shared cross-language contract (../shared/CONTRACT.md,
+books.txt, words.txt): the same 20 real books, the same 10 fixed
+query words, and the same 3 synthetic scales that Java and C++ must
+also use, so results are comparable across languages (see
+shared_contract.py for how these are loaded).
 
 Metrics measured for each structure (see the "why these metrics"
 notes below):
   1. Build time        -> time to build the full index from scratch
-  2. Lookup cost        -> average time to resolve a single term
+  2. Query performance  -> average time to resolve each of the 10
+                           contract words (../shared/words.txt) - a
+                           fixed workload, not a random sample, so
+                           every language measures the exact same
+                           queries
   3. Storage overhead   -> number of files/dirs, total size on disk
+  4. Scalability        -> the trend across the 3 contract scales
+                           (1,000 / 10,000 / 100,000 books)
 
 Why lookup cost is measured differently per structure:
   - Monolithic JSON: a lookup normally happens against an index
@@ -30,29 +37,28 @@ Why lookup cost is measured differently per structure:
     environment cannot reach a local MongoDB instance.
 
 Usage:
-    python benchmark_inverted_index.py [n_books] [book_ids_csv]
+    python benchmark_inverted_index.py [scales_csv] [book_ids_csv]
         Benchmarks the JSON and hierarchical structures (no network
-        or database required). Default n_books = 200, book_ids_csv =
-        "5,11,1342" (all 3 real books already in the datalake).
-        book_ids_csv lets you restrict the real content used to build
-        the vocabulary (e.g. "5" alone) - useful on slow/networked
-        filesystems, since the hierarchical structure writes one file
-        per unique term and vocabulary size (not n_books) is what
-        drives that cost.
+        or database required) at every scale in scales_csv (default
+        "1000,10000,100000", the contract's 3 scales). book_ids_csv
+        overrides the 20 contract books (e.g. "5" alone, for a quick
+        local smoke test on slow/networked filesystems) - leave it
+        out for an official, contract-compliant run.
 
-    python benchmark_inverted_index.py --mongo [n_books] [mongo_uri] [book_ids_csv]
-        Benchmarks the MongoDB structure only. Requires a running
-        MongoDB instance (see inverted_index_mongo.py for how to start
-        one with Docker) and the pymongo package.
+    python benchmark_inverted_index.py --mongo [scales_csv] [mongo_uri] [book_ids_csv]
+        Benchmarks the MongoDB structure only, at every scale.
+        Requires a running MongoDB instance (see
+        inverted_index_mongo.py for how to start one with Docker) and
+        the pymongo package.
 
 Both modes MERGE their results into
     datamarts/benchmark_inverted_index_results.json
 so running the JSON/hierarchical part and the MongoDB part separately
-(e.g. from different machines) still produces one combined report.
+(e.g. from different machines), or re-running just one scale, still
+produces one combined report.
 """
 
 import json
-import random
 import shutil
 import sys
 import time
@@ -61,9 +67,13 @@ from pathlib import Path
 import inverted_index as idx_json
 import inverted_index_hierarchical as idx_hier
 
-# Where the 3 real books already live, and which ids they are.
-REAL_BOOKS_DIR = Path("datalake/20260917/18")
-ALL_REAL_BOOK_IDS = [5, 11, 1342]
+from shared_contract import load_book_ids, load_words
+
+# Where the 20 contract books already live (see download_shared_dataset.py).
+REAL_BOOKS_DIR = Path("datalake_shared")
+ALL_REAL_BOOK_IDS = load_book_ids()
+# The 10 fixed query words every language must use (../shared/words.txt).
+QUERY_WORDS = load_words()
 # Scratch folder for everything this benchmark creates - kept separate
 # from the real datamarts/ output so we never mix synthetic and real
 # data while a run is in progress (it's deleted again at the end).
@@ -74,11 +84,10 @@ HIER_ROOT = BENCH_ROOT / "inverted_index_hier"
 # The one file that DOES survive after cleanup - the actual results,
 # which is what gets committed to the repo as evidence.
 RESULTS_PATH = Path("datamarts/benchmark_inverted_index_results.json")
-N_LOOKUPS = 200
 
 
 def load_real_bodies(real_book_ids):
-    """Loads the body text for the given real books already in the datalake."""
+    """Loads the body text for the given real books already in datalake_shared/."""
     # Dict comprehension: reads each real book's body text once up
     # front, keyed by its book_id, so the synthetic-datalake loop
     # below never re-reads a real file twice.
@@ -124,7 +133,7 @@ def dir_size_bytes(root: Path) -> int:
 
 
 def benchmark_json(book_ids):
-    print("Building JSON (monolithic) index...")
+    print("  Building JSON (monolithic) index...")
     # Build time: scan every synthetic body file and write the whole
     # index out as a single JSON file.
     t0 = time.perf_counter()
@@ -138,10 +147,11 @@ def benchmark_json(book_ids):
     loaded = idx_json.load_index(str(JSON_OUT))
     load_seconds = time.perf_counter() - t0
 
-    # In-memory lookup cost, once the index is already loaded.
-    sample_terms = random.sample(list(loaded.keys()), min(N_LOOKUPS, len(loaded)))
+    # In-memory lookup cost for the 10 fixed contract words. A word
+    # absent from this run's vocabulary is still a valid (empty-
+    # result) query to time, so we query all 10 regardless.
     t0 = time.perf_counter()
-    for term in sample_terms:
+    for term in QUERY_WORDS:
         idx_json.search(loaded, term)
     lookup_seconds = time.perf_counter() - t0
 
@@ -152,14 +162,14 @@ def benchmark_json(book_ids):
         "n_terms": len(loaded),
         "build_seconds": round(build_seconds, 4),
         "cold_load_seconds": round(load_seconds, 4),
-        "in_memory_lookup_avg_ms": round((lookup_seconds / len(sample_terms)) * 1000, 5),
+        "in_memory_lookup_avg_ms": round((lookup_seconds / len(QUERY_WORDS)) * 1000, 5),
         "num_files": 1,
         "total_size_bytes": JSON_OUT.stat().st_size,
     }
 
 
 def benchmark_hierarchical(book_ids):
-    print("Building hierarchical (folder-per-letter/file-per-term) index...")
+    print("  Building hierarchical (folder-per-letter/file-per-term) index...")
     # Build time: scan every synthetic body file and write one file
     # per unique term.
     t0 = time.perf_counter()
@@ -167,16 +177,15 @@ def benchmark_hierarchical(book_ids):
     build_seconds = time.perf_counter() - t0
 
     # Every lookup here always means opening a small file from disk -
-    # there's no equivalent "load once" step.
-    all_terms = [p.stem for p in HIER_ROOT.rglob("*.txt")]
-    sample_terms = random.sample(all_terms, min(N_LOOKUPS, len(all_terms)))
+    # there's no equivalent "load once" step. Same 10 fixed words.
     t0 = time.perf_counter()
-    for term in sample_terms:
+    for term in QUERY_WORDS:
         idx_hier.search(term, str(HIER_ROOT))
     lookup_seconds = time.perf_counter() - t0
 
     # Storage overhead: total term-files written, and how many letter
     # subfolders (A/, B/, ...) they're spread across.
+    all_terms = [p.stem for p in HIER_ROOT.rglob("*.txt")]
     num_files = len(all_terms)
     num_dirs = len([p for p in HIER_ROOT.iterdir() if p.is_dir()])
 
@@ -186,7 +195,7 @@ def benchmark_hierarchical(book_ids):
         "structure": "hierarchical",
         "n_terms": n_terms,
         "build_seconds": round(build_seconds, 4),
-        "avg_lookup_ms": round((lookup_seconds / len(sample_terms)) * 1000, 5),
+        "avg_lookup_ms": round((lookup_seconds / len(QUERY_WORDS)) * 1000, 5),
         "num_files": num_files,
         "num_dirs": num_dirs,
         "total_size_bytes": dir_size_bytes(HIER_ROOT),
@@ -199,24 +208,16 @@ def benchmark_mongo(book_ids, uri):
     # or a live MongoDB instance to be available.
     import inverted_index_mongo as idx_mongo
 
-    print(f"Building MongoDB index at {uri} ...")
+    print(f"  Building MongoDB index at {uri} ...")
     # Build time: scan every synthetic body file and insert one
     # document per unique term into MongoDB.
     t0 = time.perf_counter()
     n_terms = idx_mongo.build_index(str(SYNTHETIC_DATALAKE), uri)
     build_seconds = time.perf_counter() - t0
 
-    # Fetch just the list of terms (not their full postings) so we
-    # have something to sample from for the lookup timing below.
-    client, collection = idx_mongo.get_collection(uri)
-    try:
-        all_terms = [d["term"] for d in collection.find({}, {"term": 1})]
-    finally:
-        client.close()
-
-    sample_terms = random.sample(all_terms, min(N_LOOKUPS, len(all_terms)))
+    # Same 10 fixed contract words.
     t0 = time.perf_counter()
-    for term in sample_terms:
+    for term in QUERY_WORDS:
         idx_mongo.search(term, uri)
     lookup_seconds = time.perf_counter() - t0
 
@@ -227,30 +228,45 @@ def benchmark_mongo(book_ids, uri):
         "structure": "mongodb",
         "n_terms": n_terms,
         "build_seconds": round(build_seconds, 4),
-        "avg_lookup_ms": round((lookup_seconds / len(sample_terms)) * 1000, 5),
+        "avg_lookup_ms": round((lookup_seconds / len(QUERY_WORDS)) * 1000, 5),
     }
 
 
-def merge_results(new_results: dict):
-    # Load whatever results are already on disk (e.g. from an earlier
-    # JSON/hierarchical run), so this call only adds/replaces the
-    # structures in new_results without erasing the others.
+def merge_results(scale: int, new_results: dict):
+    """
+    Loads whatever's already on disk and merges new_results into the
+    entry for this one scale, leaving every other scale - and every
+    other structure already recorded at this same scale - untouched.
+    This is what lets the JSON/hierarchical run and the separate
+    --mongo run (maybe on a different machine, maybe for a different
+    scale) combine into one report instead of overwriting each other.
+    """
     RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    existing = {}
+    existing = {"scales": [], "results_by_scale": {}}
     if RESULTS_PATH.exists():
         existing = json.loads(RESULTS_PATH.read_text(encoding="utf-8"))
-    # dict.update() overwrites keys that already exist and adds new
-    # ones, which is exactly the merge behaviour described in the
-    # module docstring.
-    existing.update(new_results)
+        existing.setdefault("results_by_scale", {})
+
+    scale_key = str(scale)
+    existing["results_by_scale"].setdefault(scale_key, {})
+    # dict.update() overwrites structures that already exist at this
+    # scale and adds new ones, same merge behaviour as before, just
+    # now scoped to one scale instead of the whole file.
+    existing["results_by_scale"][scale_key].update(new_results)
+
+    # Keep the top-level "scales" list in sync with whatever scales
+    # actually have data, sorted for a stable/readable file.
+    existing["scales"] = sorted(int(k) for k in existing["results_by_scale"].keys())
+
     RESULTS_PATH.write_text(json.dumps(existing, indent=2), encoding="utf-8")
-    return existing
+    return existing["results_by_scale"][scale_key]
 
 
-def print_table(results_by_structure: dict):
+def print_table(scale: int, results_by_structure: dict):
     # Simple fixed-width table so the comparison is readable straight
-    # from the terminal.
-    print(f"\n{'Structure':<18}{'Build (s)':<12}{'Lookup':<28}{'Files':<10}{'Size (KB)':<12}")
+    # from the terminal, printed once per scale.
+    print(f"\n--- {scale} books ---")
+    print(f"{'Structure':<18}{'Build (s)':<12}{'Lookup':<28}{'Files':<10}{'Size (KB)':<12}")
     print("-" * 80)
     for r in results_by_structure.values():
         # Each structure reports lookup cost differently (see the
@@ -274,44 +290,56 @@ def print_table(results_by_structure: dict):
         print(f"{r['structure']:<18}{r['build_seconds']:<12}{lookup_desc:<28}{str(files):<10}{str(size_kb):<12}")
 
 
+def parse_scales(csv_str):
+    return [int(x) for x in csv_str.split(",") if x.strip()]
+
+
 def parse_book_ids(csv_str):
-    # Turns a comma-separated string like "5,11,1342" into the list of
-    # ints [5, 11, 1342]; the "if x.strip()" guard skips empty entries
-    # (e.g. a stray trailing comma).
+    # Turns a comma-separated string like "11,84,1342" into the list
+    # of ints; the "if x.strip()" guard skips empty entries (e.g. a
+    # stray trailing comma).
     return [int(x) for x in csv_str.split(",") if x.strip()]
 
 
 def main():
     args = sys.argv[1:]
-    # Fixed seed so random.sample() picks the same lookup terms every
-    # run, making results reproducible and comparable across runs.
-    random.seed(42)
+
+    print(f"Query workload: {len(QUERY_WORDS)} fixed words from ../shared/words.txt {QUERY_WORDS}")
 
     if args and args[0] == "--mongo":
         # --mongo mode: `python benchmark_inverted_index.py --mongo
-        # [n_books] [mongo_uri] [book_ids_csv]` - only builds and
-        # benchmarks the MongoDB structure.
-        n_books = int(args[1]) if len(args) > 1 else 200
+        # [scales_csv] [mongo_uri] [book_ids_csv]` - only builds and
+        # benchmarks the MongoDB structure, at every scale.
+        scales_csv = args[1] if len(args) > 1 else "1000,10000,100000"
         uri = args[2] if len(args) > 2 else "mongodb://localhost:27017/"
         real_book_ids = parse_book_ids(args[3]) if len(args) > 3 else ALL_REAL_BOOK_IDS
-        book_ids = build_synthetic_datalake(n_books, real_book_ids)
-        result = benchmark_mongo(book_ids, uri)
-        combined = merge_results({"mongodb": result})
-    else:
-        # Default mode: `python benchmark_inverted_index.py [n_books]
-        # [book_ids_csv]` - builds and benchmarks both the JSON and
-        # hierarchical structures together.
-        n_books = int(args[0]) if len(args) > 0 else 200
-        real_book_ids = parse_book_ids(args[1]) if len(args) > 1 else ALL_REAL_BOOK_IDS
-        book_ids = build_synthetic_datalake(n_books, real_book_ids)
-        json_result = benchmark_json(book_ids)
-        hier_result = benchmark_hierarchical(book_ids)
-        combined = merge_results({
-            "json_monolithic": json_result,
-            "hierarchical": hier_result,
-        })
+        scales = parse_scales(scales_csv)
 
-    print_table(combined)
+        for scale in scales:
+            print(f"\n=== {scale} books (MongoDB) ===")
+            book_ids = build_synthetic_datalake(scale, real_book_ids)
+            result = benchmark_mongo(book_ids, uri)
+            combined = merge_results(scale, {"mongodb": result})
+            print_table(scale, combined)
+    else:
+        # Default mode: `python benchmark_inverted_index.py [scales_csv]
+        # [book_ids_csv]` - builds and benchmarks both the JSON and
+        # hierarchical structures together, at every scale.
+        scales_csv = args[0] if len(args) > 0 else "1000,10000,100000"
+        real_book_ids = parse_book_ids(args[1]) if len(args) > 1 else ALL_REAL_BOOK_IDS
+        scales = parse_scales(scales_csv)
+
+        for scale in scales:
+            print(f"\n=== {scale} books (JSON + hierarchical) ===")
+            book_ids = build_synthetic_datalake(scale, real_book_ids)
+            json_result = benchmark_json(book_ids)
+            hier_result = benchmark_hierarchical(book_ids)
+            combined = merge_results(scale, {
+                "json_monolithic": json_result,
+                "hierarchical": hier_result,
+            })
+            print_table(scale, combined)
+
     print(f"\nResults written to {RESULTS_PATH}")
 
     # Remove the synthetic datalake/index files this run created -
