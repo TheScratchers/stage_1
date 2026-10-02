@@ -68,15 +68,19 @@ For the scalability dimension (datalake, metadata, and inverted-index
 benchmarks), synthetic volumes are built by replicating the 20 real
 books' content across synthetic ids, at these 3 scales:
 
+- 100 books
 - 1,000 books
 - 10,000 books
-- 100,000 books
+
+(Updated from an earlier draft of 1,000/10,000/100,000: these smaller,
+still log-spaced scales - a 10x step each time, 100x range overall -
+already show a clear scalability trend while keeping each language's
+benchmark runtime reasonable. These are also the scales Pablo's C++
+implementation already uses, so adopting them here needs no rework on
+his side.)
 
 Every language should report its throughput/latency numbers at all 3
 scales, so the trend across scales is comparable language-to-language.
-If a language's implementation can't reasonably reach 100,000 in the
-available time, say so explicitly in the report rather than silently
-skipping it.
 
 ## 5. Metadata stress test (team extension, not required by the spec)
 
