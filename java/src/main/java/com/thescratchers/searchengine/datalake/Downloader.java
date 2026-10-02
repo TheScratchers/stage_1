@@ -1,3 +1,5 @@
+package com.thescratchers.searchengine.datalake;
+
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -11,7 +13,7 @@ import java.util.regex.Pattern;
 
 public class Downloader {
     private static final String START_MARKER = "*** START OF THE PROJECT GUTENBERG EBOOK";
-    private static final String END_MARKER = "*** END OF THE PROJECT GUTENBERG EBOOK";
+    private static final String END_MARKER   = "*** END OF THE PROJECT GUTENBERG EBOOK";
     private static final String DATALAKE_PATH = "../data/datalake/";
 
     public static boolean downloadBook(int bookId, String url) {
@@ -19,7 +21,7 @@ public class Downloader {
             HttpClient client = HttpClient.newBuilder()
                     .followRedirects(HttpClient.Redirect.NORMAL)
                     .build();
-            
+
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .build();
@@ -41,12 +43,12 @@ public class Downloader {
             LocalDateTime now = LocalDateTime.now();
             String dateFolder = now.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
             String hourFolder = now.format(DateTimeFormatter.ofPattern("HH"));
-            
+
             Path outputPath = Paths.get(DATALAKE_PATH, dateFolder, hourFolder);
             Files.createDirectories(outputPath);
 
             Files.writeString(outputPath.resolve(bookId + ".header.txt"), header.trim());
-            Files.writeString(outputPath.resolve(bookId + ".body.txt"), body.trim());
+            Files.writeString(outputPath.resolve(bookId + ".body.txt"),   body.trim());
 
             System.out.println("[DOWNLOADER] Successfully saved to: " + outputPath.toString());
             return true;

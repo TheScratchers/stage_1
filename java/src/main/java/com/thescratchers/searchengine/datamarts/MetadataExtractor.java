@@ -1,3 +1,5 @@
+package com.thescratchers.searchengine.datamarts;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -15,15 +17,15 @@ public class MetadataExtractor {
     private static final String DB_URL = "jdbc:sqlite:../data/datamarts/metadata.db";
 
     public static class BookMetadata {
-        public int bookId;
+        public int    bookId;
         public String title;
         public String author;
         public String language;
 
         public BookMetadata(int bookId, String title, String author, String language) {
-            this.bookId = bookId;
-            this.title = title;
-            this.author = author;
+            this.bookId   = bookId;
+            this.title    = title;
+            this.author   = author;
             this.language = language;
         }
     }
@@ -37,13 +39,13 @@ public class MetadataExtractor {
                 + ");";
 
         try {
-            // 1. Crear la estructura de carpetas ANTES de la conexión
+            // 1. Crear la estructura de carpetas ANTES de la conexion
             Files.createDirectories(Paths.get("../data/datamarts"));
-            
-            // 2. Conectar a SQLite (esto creará el archivo metadata.db automáticamente)
+
+            // 2. Conectar a SQLite (crea el archivo metadata.db automaticamente)
             try (Connection conn = DriverManager.getConnection(DB_URL);
-                 Statement stmt = conn.createStatement()) {
-                
+                 Statement  stmt = conn.createStatement()) {
+
                 stmt.execute(createTableSQL);
                 System.out.println("[METADATA] Database and schema validated.");
             }
@@ -55,17 +57,17 @@ public class MetadataExtractor {
     private static void insertMetadata(BookMetadata metadata) {
         String insertSQL = "INSERT OR REPLACE INTO books (book_id, title, author, language) VALUES (?, ?, ?, ?)";
 
-        try (Connection conn = DriverManager.getConnection(DB_URL);
+        try (Connection conn  = DriverManager.getConnection(DB_URL);
              PreparedStatement pstmt = conn.prepareStatement(insertSQL)) {
-            
+
             pstmt.setInt(1, metadata.bookId);
             pstmt.setString(2, metadata.title);
             pstmt.setString(3, metadata.author);
             pstmt.setString(4, metadata.language);
             pstmt.executeUpdate();
-            
+
             System.out.println("[METADATA] Successfully inserted book " + metadata.bookId + " into database.");
-            
+
         } catch (Exception e) {
             System.err.println("[METADATA] Error inserting into database: " + e.getMessage());
         }
@@ -93,6 +95,7 @@ public class MetadataExtractor {
     }
 
     public static void processBook(int bookId) {
+        initDatabase();
         try {
             Path headerPath = findHeaderFile(bookId);
             if (headerPath == null) {
@@ -100,9 +103,9 @@ public class MetadataExtractor {
                 return;
             }
 
-            String content = Files.readString(headerPath);
-            String title = extractField(content, "Title:\\s*(.*)");
-            String author = extractField(content, "Author:\\s*(.*)");
+            String content  = Files.readString(headerPath);
+            String title    = extractField(content, "Title:\\s*(.*)");
+            String author   = extractField(content, "Author:\\s*(.*)");
             String language = extractField(content, "Language:\\s*(.*)");
 
             BookMetadata metadata = new BookMetadata(bookId, title, author, language);
