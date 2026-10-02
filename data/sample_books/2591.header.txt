@@ -1,4 +1,4 @@
-The Project Gutenberg eBook of Pride and Prejudice
+The Project Gutenberg eBook of Grimms' Fairy Tales
     
 This eBook is for the use of anyone anywhere in the United States and
 most other parts of the world at no cost and with almost no restrictions
@@ -8,17 +8,18 @@ at www.gutenberg.org. If you are not located in the United States,
 you will have to check the laws of the country where you are located
 before using this eBook.
 
-Title: Pride and Prejudice
+Title: Grimms' Fairy Tales
 
-Author: Jane Austen
+Author: Jacob Grimm
+        Wilhelm Grimm
 
 
         
-Release date: June 1, 1998 [eBook #1342]
-                Most recently updated: September 1, 2026
+Release date: April 1, 2001 [eBook #2591]
+                Most recently updated: September 20, 2026
 
 Language: English
 
-Other information and formats: www.gutenberg.org/ebooks/1342
+Other information and formats: www.gutenberg.org/ebooks/2591
 
-Credits: Chuck Greif and the Online Distributed Proofreading Team at http://www.pgdp.net (This file was produced from images available at The Internet Archive)
+Credits: Emma Dudding, John Bickers, Dagny and David Widger
