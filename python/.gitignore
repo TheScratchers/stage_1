@@ -4,8 +4,10 @@ test_output/
 datalake/
 datalake_book/
 datalake_batch/
+datalake_shared/
 bench_data/
 bench_data_idx/
+bench_data_metadata/
 datamarts/*.db
 datamarts/*.json
 !datamarts/benchmark_datalake_results.json
