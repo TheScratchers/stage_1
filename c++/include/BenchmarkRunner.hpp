@@ -20,4 +20,10 @@ public:
         int nBooks,
         const std::string& outJsonPath
     );
+
+    static void runMetadataBenchmark(
+        const std::filesystem::path& benchDbPath,
+        int nBooks,
+        const std::string& outJsonPath
+    );
 };

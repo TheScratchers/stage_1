@@ -111,11 +111,14 @@ The compiled executable `search_engine` supports rich subcommands:
 ### Benchmarks
 ```bash
 # Benchmark the 3 Datalake structures (saves to data/datamarts/benchmark_datalake_results.json)
-./build/search_engine bench-datalake 200
+./build/search_engine bench-datalake 1000
 
-# Benchmark the 3 Inverted Index structures (saves to data/datamarts/benchmark_inverted_index_results.json)
-./build/search_engine bench-index 100
+# Benchmark SQLite Metadata storage: insert speed, query by ID & Dickens/Carroll (saves to benchmark_metadata_results.json)
+./build/search_engine bench-metadata 1000
 
-# Run all benchmarks
-./build/search_engine bench-all
+# Benchmark the 3 Inverted Index structures using the 10 contract words (saves to benchmark_inverted_index_results.json)
+./build/search_engine bench-index 1000
+
+# Run all 3 benchmarks sequentially
+./build/search_engine bench-all 1000
 ```

@@ -18,8 +18,9 @@ static void printUsage(const char* p) {
               << "  query-or  <t1> <t2> ...      Boolean OR search\n"
               << "  metadata [--id N | --author X | --title Y | --all]\n"
               << "  bench-datalake [N]           Benchmark Datalake layouts\n"
+              << "  bench-metadata [N]           Benchmark SQLite Metadata storage\n"
               << "  bench-index [N]              Benchmark Inverted Index structures\n"
-              << "  bench-all                    Run all benchmarks\n"
+              << "  bench-all [N]                Run all benchmarks\n"
               << "  test-sample                  Run sample dataset test\n\n";
 }
 
@@ -95,12 +96,17 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    if (cmd == "bench-datalake" || cmd == "bench-index" || cmd == "bench-all") {
+    if (cmd == "bench-datalake" || cmd == "bench-index" || cmd == "bench-metadata" || cmd == "bench-all") {
         fs::path bDir = ctrl.getControlPath().parent_path() / "data" / "bench";
-        int nL = (argc > 2 && cmd == "bench-datalake") ? std::stoi(argv[2]) : 200;
-        int nI = (argc > 2 && cmd == "bench-index") ? std::stoi(argv[2]) : 100;
+        int nParam = (argc > 2) ? std::stoi(argv[2]) : 0;
+        int nL = (cmd == "bench-datalake" && nParam > 0) ? nParam : (nParam > 0 ? nParam : 200);
+        int nM = (cmd == "bench-metadata" && nParam > 0) ? nParam : (nParam > 0 ? nParam : 1000);
+        int nI = (cmd == "bench-index" && nParam > 0) ? nParam : (nParam > 0 ? nParam : 100);
+
         if (cmd == "bench-datalake" || cmd == "bench-all")
             BenchmarkRunner::runDatalakeBenchmark(bDir / "lake", lPath, nL, (mPath / "benchmark_datalake_results.json").string());
+        if (cmd == "bench-metadata" || cmd == "bench-all")
+            BenchmarkRunner::runMetadataBenchmark(bDir / "bench_metadata.db", nM, (mPath / "benchmark_metadata_results.json").string());
         if (cmd == "bench-index" || cmd == "bench-all")
             BenchmarkRunner::runIndexBenchmark(bDir / "idx", lPath, nI, (mPath / "benchmark_inverted_index_results.json").string());
         return 0;
