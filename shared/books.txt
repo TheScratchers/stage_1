@@ -1,0 +1,55 @@
+# Stage 1 - Shared benchmark dataset: 20 real Project Gutenberg books
+# used identically by all 3 languages (Python, Java, C++) so that
+# datalake/indexing benchmarks are comparable across languages.
+# See CONTRACT.md for the full rules.
+#
+# Format: one Gutenberg book_id per line. Blank lines and lines
+# starting with "#" are comments and must be ignored by parsers.
+#
+# id    | title                                      | author
+# ------|--------------------------------------------|------------------------
+# 11    | Alice's Adventures in Wonderland            | Lewis Carroll
+# 84    | Frankenstein                                | Mary Shelley
+# 1342  | Pride and Prejudice                         | Jane Austen
+# 2701  | Moby-Dick                                   | Herman Melville
+# 1661  | The Adventures of Sherlock Holmes           | Arthur Conan Doyle
+# 98    | A Tale of Two Cities                        | Charles Dickens
+# 345   | Dracula                                     | Bram Stoker
+# 76    | Adventures of Huckleberry Finn               | Mark Twain
+# 74    | The Adventures of Tom Sawyer                | Mark Twain
+# 43    | The Strange Case of Dr Jekyll and Mr Hyde   | Robert Louis Stevenson
+# 174   | The Picture of Dorian Gray                  | Oscar Wilde
+# 46    | A Christmas Carol                           | Charles Dickens
+# 120   | Treasure Island                             | Robert Louis Stevenson
+# 1260  | Jane Eyre                                   | Charlotte Bronte
+# 2554  | Crime and Punishment                        | Fyodor Dostoevsky
+# 844   | The Importance of Being Earnest             | Oscar Wilde
+# 1400  | Great Expectations                          | Charles Dickens
+# 2591  | Grimm's Fairy Tales                         | Jacob and Wilhelm Grimm
+# 5200  | Metamorphosis                               | Franz Kafka
+# 55    | The Wonderful Wizard of Oz                  | L. Frank Baum
+#
+# NOTE: 11, 84 and 1342 are the same 3 books already bundled as the
+# offline sample dataset in data/sample_books/ (see c++/README.md,
+# "test-sample"). The other 17 are new additions for this contract -
+# titles/authors above were cross-checked against gutenberg.org.
+11
+84
+1342
+2701
+1661
+98
+345
+76
+74
+43
+174
+46
+120
+1260
+2554
+844
+1400
+2591
+5200
+55

@@ -12,8 +12,38 @@ from pathlib import Path
 
 import requests
 
+# These are the exact marker lines Project Gutenberg inserts around the
+# actual book text, used to split header / body / footer apart.
 START_MARKER = "*** START OF THE PROJECT GUTENBERG EBOOK"
 END_MARKER = "*** END OF THE PROJECT GUTENBERG EBOOK"
+
+
+def save_book(book_id: int, header: str, body: str, output_path: str) -> None:
+    """
+    Saves already-parsed header/body text for a book into the given
+    output directory, following the <book_id>.header.txt /
+    <book_id>.body.txt naming convention used across the datalake.
+
+    Split out from download_book() so that other code (e.g. benchmarks)
+    can reuse real, already-downloaded content for many book_ids without
+    needing network access.
+    """
+    output_dir = Path(output_path)
+    # parents=True creates any missing parent directories too (e.g. the
+    # whole datalake/20260101/14/ chain); exist_ok=True means it's not
+    # an error if this directory was already created by a previous book.
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    body_path = output_dir / f"{book_id}.body.txt"
+    header_path = output_dir / f"{book_id}.header.txt"
+
+    # .strip() drops the blank line(s) left behind right at the marker
+    # boundary, so files don't start/end with stray empty lines.
+    with open(body_path, "w", encoding="utf-8") as f:
+        f.write(body.strip())
+
+    with open(header_path, "w", encoding="utf-8") as f:
+        f.write(header.strip())
 
 
 def download_book(book_id: int, output_path: str) -> bool:
@@ -24,40 +54,45 @@ def download_book(book_id: int, output_path: str) -> bool:
     Returns True on success, False if the book could not be parsed
     (e.g. markers not found) or downloaded.
     """
-    output_dir = Path(output_path)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
+    # Every Gutenberg book follows this same URL pattern, built from
+    # its numeric id.
     url = f"https://www.gutenberg.org/cache/epub/{book_id}/pg{book_id}.txt"
 
     try:
         response = requests.get(url, timeout=30)
+        # Raises an exception for HTTP error status codes (404, 500...),
+        # so a failed download is caught below instead of silently
+        # treating an error page's HTML as if it were the book text.
         response.raise_for_status()
     except requests.RequestException as exc:
+        # Covers connection errors, timeouts, and the raise_for_status()
+        # above - any of these mean we don't have a usable response.
         print(f"[download_book] Failed to download book {book_id}: {exc}")
         return False
 
     text = response.text
 
+    # Not every Gutenberg text uses these exact markers (very old
+    # entries and some non-English texts differ), so we bail out
+    # cleanly instead of guessing where the real content starts.
     if START_MARKER not in text or END_MARKER not in text:
         print(f"[download_book] Markers not found for book {book_id}")
         return False
 
+    # split(..., 1) assumes each marker appears exactly once; the
+    # header is everything before START_MARKER, and the footer
+    # (license boilerplate) is discarded after splitting on END_MARKER.
     header, body_and_footer = text.split(START_MARKER, 1)
-    body, footer = body_and_footer.split(END_MARKER, 1)
+    body, _footer = body_and_footer.split(END_MARKER, 1)
 
-    body_path = output_dir / f"{book_id}.body.txt"
-    header_path = output_dir / f"{book_id}.header.txt"
-
-    with open(body_path, "w", encoding="utf-8") as f:
-        f.write(body.strip())
-
-    with open(header_path, "w", encoding="utf-8") as f:
-        f.write(header.strip())
-
+    save_book(book_id, header, body, output_path)
     return True
 
 
 if __name__ == "__main__":
+    # Command-line entry point: `python download_book.py <book_id> <output_dir>`,
+    # falling back to sensible defaults so the script also works with no
+    # arguments at all (useful for a quick manual test).
     book_id = int(sys.argv[1]) if len(sys.argv) > 1 else 1342
     out_path = sys.argv[2] if len(sys.argv) > 2 else "data/output"
 
