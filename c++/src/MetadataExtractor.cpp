@@ -49,30 +49,37 @@ bool MetadataExtractor::initDatabase(const std::string& dbPath) {
     return true;
 }
 
-bool MetadataExtractor::saveToDatabase(const BookMetadata& m, const std::string& dbPath) {
-    if (!initDatabase(dbPath)) return false;
+bool MetadataExtractor::saveBatchToDatabase(const std::vector<BookMetadata>& list, const std::string& dbPath) {
+    if (!initDatabase(dbPath) || list.empty()) return false;
     sqlite3* db = nullptr;
     if (sqlite3_open(dbPath.c_str(), &db) != SQLITE_OK) return false;
 
+    sqlite3_exec(db, "BEGIN TRANSACTION;", nullptr, nullptr, nullptr);
     const char* sql = "INSERT OR REPLACE INTO books VALUES (?, ?, ?, ?, ?, ?, ?);";
     sqlite3_stmt* stmt = nullptr;
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
         sqlite3_close(db);
         return false;
     }
-
-    sqlite3_bind_int(stmt, 1, m.bookId);
-    sqlite3_bind_text(stmt, 2, m.title.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 3, m.author.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 4, m.language.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 5, m.headerPath.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 6, m.bodyPath.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmt, 7, m.ingestedAt.c_str(), -1, SQLITE_TRANSIENT);
-
-    int rc = sqlite3_step(stmt);
+    for (const auto& m : list) {
+        sqlite3_bind_int(stmt, 1, m.bookId);
+        sqlite3_bind_text(stmt, 2, m.title.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 3, m.author.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 4, m.language.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 5, m.headerPath.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 6, m.bodyPath.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 7, m.ingestedAt.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_step(stmt);
+        sqlite3_reset(stmt);
+    }
     sqlite3_finalize(stmt);
+    sqlite3_exec(db, "COMMIT;", nullptr, nullptr, nullptr);
     sqlite3_close(db);
-    return (rc == SQLITE_DONE);
+    return true;
+}
+
+bool MetadataExtractor::saveToDatabase(const BookMetadata& m, const std::string& dbPath) {
+    return saveBatchToDatabase({m}, dbPath);
 }
 
 static BookMetadata readRow(sqlite3_stmt* stmt) {

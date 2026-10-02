@@ -20,6 +20,7 @@ public:
     static BookMetadata parseHeader(int bookId, const std::string& headerText);
     static bool initDatabase(const std::string& dbPath);
     static bool saveToDatabase(const BookMetadata& metadata, const std::string& dbPath);
+    static bool saveBatchToDatabase(const std::vector<BookMetadata>& list, const std::string& dbPath);
     static std::optional<BookMetadata> queryById(int bookId, const std::string& dbPath);
     static std::vector<BookMetadata> queryByAuthor(const std::string& author, const std::string& dbPath);
     static std::vector<BookMetadata> queryByTitle(const std::string& title, const std::string& dbPath);
