@@ -21,9 +21,9 @@ Metrics measured at each scale:
                           "bigger result set costs more" effect is
                           visible instead of averaged away.
   3. Scalability       -> the trend across scales IS this metric: we
-                          run the same experiments at 1,000, 10,000
-                          and 100,000 books and compare how insertion
-                          and query times change as the table grows.
+                          run the same experiments at 100, 1,000 and
+                          10,000 books and compare how insertion and
+                          query times change as the table grows.
 
 Uses the 20 real contract books already downloaded into
 datalake_shared/ (see download_shared_dataset.py), replicating their
@@ -38,7 +38,7 @@ idealized bulk-insert number.
 
 Usage:
     python benchmark_metadata.py [scales_csv]
-        Default scales_csv = "1000,10000,100000" (the contract's 3
+        Default scales_csv = "100,1000,10000" (the contract's 3
         scales). Example: python benchmark_metadata.py 500,5000
 
 Results are printed to stdout and also written as JSON to
@@ -112,9 +112,9 @@ def benchmark_scale(n_books: int, meta_by_real_id: dict):
             f"datalake/.../{book_id}.body.txt",
             f"datalake/.../{book_id}.header.txt",
         )
-        # Progress heartbeat for the larger scales, so a 100,000-row
-        # run doesn't look stuck for several minutes with no output.
-        if (i + 1) % 20000 == 0:
+        # Progress heartbeat for the larger scales, so a 10,000-row
+        # run doesn't look stuck for a while with no output.
+        if (i + 1) % 2000 == 0:
             print(f"  ...inserted {i + 1}/{n_books}")
     insert_elapsed = time.perf_counter() - t0
 
@@ -158,7 +158,7 @@ def parse_scales(csv_str: str):
 
 
 def main():
-    scales_csv = sys.argv[1] if len(sys.argv) > 1 else "1000,10000,100000"
+    scales_csv = sys.argv[1] if len(sys.argv) > 1 else "100,1000,10000"
     scales = parse_scales(scales_csv)
     random.seed(42)
 

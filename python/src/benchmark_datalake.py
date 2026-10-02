@@ -23,7 +23,7 @@ volumes far beyond the 20 books we actually have.
 
 Usage:
     python benchmark_datalake.py [scales_csv]
-        Default scales_csv = "1000,10000,100000" (the contract's 3
+        Default scales_csv = "100,1000,10000" (the contract's 3
         scales). Example: python benchmark_datalake.py 500,5000
 
 Results are printed to stdout and also written as JSON to
@@ -177,7 +177,7 @@ def main():
     # scales can be overridden from the command line: `python
     # benchmark_datalake.py 500,5000`; a fixed random seed makes the
     # lookup sample (and therefore the results) reproducible.
-    scales_csv = sys.argv[1] if len(sys.argv) > 1 else "1000,10000,100000"
+    scales_csv = sys.argv[1] if len(sys.argv) > 1 else "100,1000,10000"
     scales = [int(x) for x in scales_csv.split(",") if x.strip()]
     random.seed(42)
 

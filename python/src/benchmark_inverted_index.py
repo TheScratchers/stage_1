@@ -19,7 +19,7 @@ notes below):
                            queries
   3. Storage overhead   -> number of files/dirs, total size on disk
   4. Scalability        -> the trend across the 3 contract scales
-                           (1,000 / 10,000 / 100,000 books)
+                           (100 / 1,000 / 10,000 books)
 
 Why lookup cost is measured differently per structure:
   - Monolithic JSON: a lookup normally happens against an index
@@ -40,7 +40,7 @@ Usage:
     python benchmark_inverted_index.py [scales_csv] [book_ids_csv]
         Benchmarks the JSON and hierarchical structures (no network
         or database required) at every scale in scales_csv (default
-        "1000,10000,100000", the contract's 3 scales). book_ids_csv
+        "100,1000,10000", the contract's 3 scales). book_ids_csv
         overrides the 20 contract books (e.g. "5" alone, for a quick
         local smoke test on slow/networked filesystems) - leave it
         out for an official, contract-compliant run.
@@ -310,7 +310,7 @@ def main():
         # --mongo mode: `python benchmark_inverted_index.py --mongo
         # [scales_csv] [mongo_uri] [book_ids_csv]` - only builds and
         # benchmarks the MongoDB structure, at every scale.
-        scales_csv = args[1] if len(args) > 1 else "1000,10000,100000"
+        scales_csv = args[1] if len(args) > 1 else "100,1000,10000"
         uri = args[2] if len(args) > 2 else "mongodb://localhost:27017/"
         real_book_ids = parse_book_ids(args[3]) if len(args) > 3 else ALL_REAL_BOOK_IDS
         scales = parse_scales(scales_csv)
@@ -325,7 +325,7 @@ def main():
         # Default mode: `python benchmark_inverted_index.py [scales_csv]
         # [book_ids_csv]` - builds and benchmarks both the JSON and
         # hierarchical structures together, at every scale.
-        scales_csv = args[0] if len(args) > 0 else "1000,10000,100000"
+        scales_csv = args[0] if len(args) > 0 else "100,1000,10000"
         real_book_ids = parse_book_ids(args[1]) if len(args) > 1 else ALL_REAL_BOOK_IDS
         scales = parse_scales(scales_csv)
 
