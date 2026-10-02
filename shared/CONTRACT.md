@@ -78,7 +78,40 @@ If a language's implementation can't reasonably reach 100,000 in the
 available time, say so explicitly in the report rather than silently
 skipping it.
 
-## 5. What each language must report
+## 5. Metadata stress test (team extension, not required by the spec)
+
+Section 4.1 of the project spec does NOT require comparing metadata
+storage across the three programming languages (the only comparison
+it mentions - SQLite vs. PostgreSQL/MySQL vs. MongoDB/Redis - is
+explicitly "optional but recommended", and it's a comparison between
+database engines, not between languages). The team has nonetheless
+decided to all benchmark our own metadata storage choice (whatever
+each language uses - SQLite, etc.) at increasing scale, to find its
+stress limit/bottleneck. Since all three of us are doing this, it
+needs the same standardization as the required benchmarks above, or
+the numbers won't be comparable between languages.
+
+Using the same 20-book dataset and the same 3 synthetic scales
+defined above, every language's metadata benchmark must measure:
+
+- **Insertion speed**: time to insert N synthetic rows.
+- **Query performance - `find_by_id`**: average time for a
+  primary-key lookup, sampled over a reasonable number of random ids
+  (the specific ids don't need to match across languages - a
+  primary-key lookup's cost depends on table size, not which id).
+- **Query performance - `find_by_author`**: average time for an
+  author lookup (`LIKE`/substring match or equivalent), using exactly
+  these 2 fixed authors so every language scans a comparable number
+  of matching rows:
+  - **Repeated author**: `Charles Dickens` (appears in 3 of the 20
+    books: 98, 46, 1400) - exercises the query against a larger
+    matching set.
+  - **Unique author**: `Lewis Carroll` (appears in only 1 of the 20
+    books: 11) - exercises the query against a minimal matching set.
+- **Scalability**: the trend across the 3 scales for both queries
+  above, same as the other two benchmarks.
+
+## 6. What each language must report
 
 For a result to be comparable, report at minimum:
 
@@ -88,8 +121,11 @@ For a result to be comparable, report at minimum:
 - **Inverted index**: indexing speed, query performance (using the 10
   words above), update performance, memory/disk usage, scalability
   (per structure, per scale).
+- **Metadata** (team extension - see Section 5): insertion speed,
+  `find_by_id` and `find_by_author` query performance (using the 2
+  fixed authors above), scalability (per scale).
 
-## 6. Status
+## 7. Status
 
 - [x] Dataset and query workload drafted
 - [ ] Reviewed and approved by Amado (Java)
