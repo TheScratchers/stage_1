@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-enum class IndexType { Json, Hierarchical, Binary };
+enum class IndexType { Json, Hierarchical, Sqlite };
 
 // Executes single-term and boolean searches across any of the 3 inverted index structures.
 class QueryEngine {

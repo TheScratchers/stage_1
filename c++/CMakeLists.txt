@@ -30,7 +30,7 @@ set(CORE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/MetadataExtractor.cpp
     ${CMAKE_SOURCE_DIR}/src/JsonIndex.cpp
     ${CMAKE_SOURCE_DIR}/src/HierarchicalIndex.cpp
-    ${CMAKE_SOURCE_DIR}/src/BinaryIndex.cpp
+    ${CMAKE_SOURCE_DIR}/src/SqliteIndex.cpp
     ${CMAKE_SOURCE_DIR}/src/QueryEngine.cpp
     ${CMAKE_SOURCE_DIR}/src/ControlLayer.cpp
     ${CMAKE_SOURCE_DIR}/src/Tokenizer.cpp

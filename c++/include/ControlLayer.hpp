@@ -7,7 +7,7 @@
 #include "MetadataExtractor.hpp"
 #include "JsonIndex.hpp"
 #include "HierarchicalIndex.hpp"
-#include "BinaryIndex.hpp"
+#include "SqliteIndex.hpp"
 
 // Orchestrates downloading, datalake storage, and datamart indexing.
 class ControlLayer {

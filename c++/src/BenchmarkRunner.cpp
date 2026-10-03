@@ -2,7 +2,7 @@
 #include "Datalake.hpp"
 #include "JsonIndex.hpp"
 #include "HierarchicalIndex.hpp"
-#include "BinaryIndex.hpp"
+#include "SqliteIndex.hpp"
 #include "MetadataExtractor.hpp"
 #include "Tokenizer.hpp"
 #include <nlohmann/json.hpp>
@@ -269,29 +269,29 @@ void BenchmarkRunner::runIndexBenchmark(const fs::path& bDir, const fs::path& lP
             {"num_files", hFiles}, {"num_dirs", hDirs}, {"total_size_bytes", hBytes}
         };
 
-        // 3. Binary Compact
-        fs::path bFile = bDir / "idx.bin";
+        // 3. SQLite Relational Index
+        fs::path sFile = bDir / "idx.db";
         t0 = std::chrono::high_resolution_clock::now();
-        BinaryIndex::buildFromMap(map, bFile.string());
-        double bBuild = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count();
-        double bRam = getPeakMemoryKb();
-
-        t0 = std::chrono::high_resolution_clock::now();
-        for (const auto& q : queries) BinaryIndex::search(q, bFile.string());
-        double bLookup = (std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count() / queries.size()) * 1000.0;
+        SqliteIndex::buildFromMap(map, sFile.string());
+        double sBuild = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count();
+        double sRam = getPeakMemoryKb();
 
         t0 = std::chrono::high_resolution_clock::now();
-        BinaryIndex::update(999999, "time love wonderland", bFile.string());
-        double bUp = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count() * 1000.0;
-        uintmax_t bBytes = fs::file_size(bFile);
+        for (const auto& q : queries) SqliteIndex::search(q, sFile.string());
+        double sLookup = (std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count() / queries.size()) * 1000.0;
 
-        std::cout << std::left << std::setw(18) << "binary_compact" << std::setw(11) << bBuild
-                  << std::setw(16) << bLookup << std::setw(15) << bUp << std::setw(14) << bRam << std::setw(14) << (bBytes / 1024.0) << "\n";
+        t0 = std::chrono::high_resolution_clock::now();
+        SqliteIndex::update(999999, "time love wonderland", sFile.string());
+        double sUp = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count() * 1000.0;
+        uintmax_t sBytes = fs::exists(sFile) ? fs::file_size(sFile) : 0;
 
-        scaleObj["binary_compact"] = {
-            {"structure", "binary_compact"}, {"n_terms", map.size()}, {"build_seconds", bBuild},
-            {"peak_memory_kb", bRam}, {"avg_lookup_ms", bLookup}, {"update_seconds", bUp / 1000.0},
-            {"num_files", 1}, {"total_size_bytes", bBytes}
+        std::cout << std::left << std::setw(18) << "sqlite_index" << std::setw(11) << sBuild
+                  << std::setw(16) << sLookup << std::setw(15) << sUp << std::setw(14) << sRam << std::setw(14) << (sBytes / 1024.0) << "\n";
+
+        scaleObj["sqlite_index"] = {
+            {"structure", "sqlite_index"}, {"n_terms", map.size()}, {"build_seconds", sBuild},
+            {"peak_memory_kb", sRam}, {"avg_lookup_ms", sLookup}, {"update_seconds", sUp / 1000.0},
+            {"num_files", 1}, {"total_size_bytes", sBytes}
         };
 
         fs::remove_all(bDir, ec);

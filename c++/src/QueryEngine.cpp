@@ -1,7 +1,7 @@
 #include "QueryEngine.hpp"
 #include "JsonIndex.hpp"
 #include "HierarchicalIndex.hpp"
-#include "BinaryIndex.hpp"
+#include "SqliteIndex.hpp"
 #include <algorithm>
 #include <set>
 
@@ -9,7 +9,7 @@ std::vector<int> QueryEngine::searchSingle(const std::string& term, IndexType ty
     switch (type) {
         case IndexType::Json:         return JsonIndex::search(term, basePath);
         case IndexType::Hierarchical: return HierarchicalIndex::search(term, basePath);
-        case IndexType::Binary:       return BinaryIndex::search(term, basePath);
+        case IndexType::Sqlite:       return SqliteIndex::search(term, basePath);
     }
     return {};
 }

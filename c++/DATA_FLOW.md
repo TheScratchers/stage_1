@@ -15,7 +15,7 @@ The C++ module is organized into focused, single-responsibility modules:
 *   **`include/Tokenizer.hpp` / `src/Tokenizer.cpp`:** Extracts cleaned, lowercase unique tokens using ASCII `[A-Za-z]+` per shared contract.
 *   **`include/JsonIndex.hpp` / `src/JsonIndex.cpp`:** Monolithic JSON inverted index using `nlohmann::json`.
 *   **`include/HierarchicalIndex.hpp` / `src/HierarchicalIndex.cpp`:** Partitioned directory-based inverted index (`A-Z/_`).
-*   **`include/BinaryIndex.hpp` / `src/BinaryIndex.cpp`:** High-performance custom binary index (`BIDX` magic, random file seek via `seekg`).
+*   **`include/SqliteIndex.hpp` / `src/SqliteIndex.cpp`:** High-performance relational inverted index (`inverted_index(term, book_id)`) with transactional writes and B-Tree index scans.
 *   **`include/QueryEngine.hpp` / `src/QueryEngine.cpp`:** Unified query engine for single-term and Boolean AND/OR queries.
 *   **`include/BenchmarkRunner.hpp` / `src/BenchmarkRunner.cpp`:** Multi-scale benchmarking suite for Datalake (write, lookup, incremental, recovery), Inverted Index (build, query, update, RAM, disk), and Metadata.
 *   **`src/main.cpp`:** Unified CLI application entry point.
@@ -62,4 +62,4 @@ The system operates as a **Task Queue** orchestrated by `ControlLayer::step()`. 
   `book_id (PK), title, author, language, header_path, body_path, ingested_at`
 - **Monolithic JSON Index:** `data/datamarts/inverted_index.json`
 - **Hierarchical Index:** `data/datamarts/inverted_index_hier/<Letter>/<term>.txt`
-- **Binary Compact Index:** `data/datamarts/inverted_index.bin` (`BIDX` magic, term dictionary table with disk offsets, direct random seek postings lookup).
+- **SQLite Relational Index:** `data/datamarts/inverted_index.db` (`inverted_index` table with `PRIMARY KEY (term, book_id)`).
