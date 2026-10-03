@@ -92,3 +92,37 @@ BookFiles Datalake::findBookRecursive(const fs::path& baseDir, int bookId) {
     files.exists = !files.headerPath.empty() && !files.bodyPath.empty();
     return files;
 }
+
+std::vector<int> Datalake::detectNewBooks(
+    const fs::path& baseDir,
+    DatalakeLayout layout,
+    const std::vector<int>& candidateIds
+) {
+    std::vector<int> newIds;
+    for (int id : candidateIds) {
+        BookFiles bf = locateBook(baseDir, layout, id);
+        if (!bf.exists) newIds.push_back(id);
+    }
+    return newIds;
+}
+
+int Datalake::recoverDatalake(
+    const fs::path& baseDir,
+    DatalakeLayout layout,
+    const std::vector<int>& expectedIds,
+    const std::map<int, std::pair<std::string, std::string>>& fallbackData
+) {
+    int restored = 0;
+    for (int id : expectedIds) {
+        BookFiles bf = locateBook(baseDir, layout, id);
+        if (!bf.exists) {
+            auto it = fallbackData.find(id);
+            std::string h = (it != fallbackData.end()) ? it->second.first : ("Title: Book " + std::to_string(id) + "\nAuthor: Unknown\nLanguage: en\n");
+            std::string b = (it != fallbackData.end()) ? it->second.second : ("Body of book " + std::to_string(id));
+            if (saveBook(baseDir, layout, id, h, b)) {
+                restored++;
+            }
+        }
+    }
+    return restored;
+}
