@@ -40,6 +40,7 @@ data/datalake/*
 data/datamarts/*.db
 data/datamarts/*.json
 control/*.txt
+dependency-reduced-pom.xml
 
 # ─── Python artifacts ───────────────────────────────────────
 python/__pycache__/

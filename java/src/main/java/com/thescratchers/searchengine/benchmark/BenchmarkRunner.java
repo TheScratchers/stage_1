@@ -1,191 +1,164 @@
 package com.thescratchers.searchengine.benchmark;
 
+import com.thescratchers.searchengine.datalake.Downloader;
+import com.thescratchers.searchengine.datamarts.TextTokenizer;
+import com.thescratchers.searchengine.datamarts.index.SqliteIndexStorage;
+import com.thescratchers.searchengine.index.InvertedIndexBuilder;
+
+import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.BenchmarkMode;
+import org.openjdk.jmh.annotations.Fork;
+import org.openjdk.jmh.annotations.Level;
+import org.openjdk.jmh.annotations.Measurement;
+import org.openjdk.jmh.annotations.Mode;
+import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.Param;
+import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.Setup;
+import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.Warmup;
+
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
-/**
- * Punto de entrada principal del benchmark comparativo entre lenguajes.
- *
- * <p>Lee la configuracion compartida desde la carpeta {@code shared/} del
- * repositorio y coordina la ejecucion de los distintos escenarios de prueba
- * para las escalas obligatorias: 1.000, 10.000 y 100.000 libros.</p>
- *
- * <p><b>Formato de los archivos de configuracion:</b>
- * <ul>
- *   <li>Lineas que comienzan por {@code #} son comentarios y se ignoran.</li>
- *   <li>Lineas en blanco tambien se ignoran.</li>
- *   <li>{@code books.txt}: un ID entero por linea (libros reales de Gutenberg).</li>
- *   <li>{@code words.txt}: una palabra por linea (workload de 10 terminos).</li>
- * </ul>
- * </p>
- *
- * <p><b>Rutas relativas</b> (resolucion desde el directorio de trabajo del proceso,
- * que debe ser la raiz del proyecto {@code stage_1/java/}):
- * <pre>
- *   ../../shared/books.txt
- *   ../../shared/words.txt
- * </pre>
- * </p>
- */
+@State(Scope.Benchmark)
+@BenchmarkMode(Mode.AverageTime)
+@OutputTimeUnit(TimeUnit.MILLISECONDS)
 public class BenchmarkRunner {
 
-    /** Escalas obligatorias del benchmark, en orden ascendente. */
-    public static final int[] SCALES = {1_000, 10_000, 100_000};
+    private static final Path BOOKS_PATH    = Paths.get("../shared/books.txt");
+    private static final Path WORDS_PATH    = Paths.get("../shared/words.txt");
+    private static final Path DATALAKE_ROOT = Paths.get("data/datalake");
 
-    /** Ruta al archivo de IDs de libros reales, relativa al directorio de trabajo. */
-    private static final Path BOOKS_PATH = Paths.get("../../shared/books.txt");
+    @Param({"100", "1000", "10000"})
+    public int scale;
 
-    /** Ruta al archivo de palabras del workload, relativa al directorio de trabajo. */
-    private static final Path WORDS_PATH = Paths.get("../../shared/words.txt");
+    private Downloader           downloader;
+    private SqliteIndexStorage   storage;
+    private InvertedIndexBuilder indexer;
 
-    // -------------------------------------------------------------------------
-    // Carga de configuracion
-    // -------------------------------------------------------------------------
+    private List<Integer>        baseBookIds;
+    private List<String>         queryWords;
+    private List<Integer>        syntheticIds;
+    private List<List<String>>   baseTokenSets;
 
-    /**
-     * Lee un archivo de configuracion y devuelve las lineas activas
-     * (sin comentarios ni lineas en blanco).
-     *
-     * @param path ruta al archivo
-     * @return lista inmutable de lineas activas, en el orden del archivo
-     * @throws IOException si el archivo no existe o no puede leerse
-     */
-    public static List<String> loadLines(Path path) throws IOException {
-        if (!Files.exists(path)) {
-            throw new IOException("[BENCHMARK] Config file not found: " + path.toAbsolutePath());
+    @Setup(Level.Trial)
+    public void setup() throws IOException {
+        baseBookIds   = loadBookIds(BOOKS_PATH);
+        queryWords    = loadWords(WORDS_PATH);
+        downloader    = new Downloader();
+
+        for (int bookId : baseBookIds) {
+            if (findFile(bookId, ".body.txt") == null) {
+                downloader.downloadBook(bookId);
+            }
         }
 
-        List<String> result = new ArrayList<>();
-        for (String line : Files.readAllLines(path)) {
-            String trimmed = line.trim();
-            // Ignorar comentarios y lineas vacias
-            if (trimmed.isEmpty() || trimmed.startsWith("#")) continue;
-            result.add(trimmed);
+        baseTokenSets = new ArrayList<>();
+        for (int bookId : baseBookIds) {
+            Path bodyFile = findFile(bookId, ".body.txt");
+            if (bodyFile == null) continue;
+            try {
+                String content = Files.readString(bodyFile);
+                List<String> tokens = TextTokenizer.tokenize(content);
+                Set<String> unique = new HashSet<>(tokens);
+                baseTokenSets.add(new ArrayList<>(unique));
+            } catch (IOException e) {
+                System.err.println("[BENCHMARK] Could not read body for book " + bookId + ": " + e.getMessage());
+            }
         }
-        return Collections.unmodifiableList(result);
+
+        syntheticIds = SyntheticDataGenerator.generateScale(baseBookIds, scale);
     }
 
-    /**
-     * Lee {@code books.txt} y devuelve los IDs de libros reales como enteros.
-     *
-     * <p>Las lineas que no sean parseable como enteros se saltan con un aviso
-     * en lugar de lanzar excepcion, para mayor robustez.</p>
-     *
-     * @return lista inmutable de IDs de libro
-     * @throws IOException si el archivo no puede leerse
-     */
-    public static List<Integer> loadBookIds() throws IOException {
-        return loadBookIds(BOOKS_PATH);
+    @Setup(Level.Iteration)
+    public void prepareIteration() {
+        File dbFile = new File("data/datamarts/inverted_index.db");
+        if (dbFile.exists()) {
+            dbFile.delete();
+        }
+        storage = new SqliteIndexStorage();
+        indexer = new InvertedIndexBuilder(storage);
     }
 
-    /**
-     * Sobrecarga que acepta una ruta personalizada (util para tests).
-     *
-     * @param path ruta al archivo {@code books.txt}
-     * @return lista inmutable de IDs de libro
-     * @throws IOException si el archivo no puede leerse
-     */
-    public static List<Integer> loadBookIds(Path path) throws IOException {
+    @Benchmark
+    @Fork(value = 1)
+    @Warmup(iterations = 1, time = 1)
+    @Measurement(iterations = 1, time = 1)
+    public void measureIndexing() {
+        if (baseTokenSets.isEmpty()) return;
+        int baseCount = baseTokenSets.size();
+        for (int i = 0; i < syntheticIds.size(); i++) {
+            int bookId = syntheticIds.get(i);
+            List<String> terms = baseTokenSets.get(i % baseCount);
+            storage.save(bookId, terms);
+        }
+    }
+
+    @Benchmark
+    @Fork(value = 1)
+    @Warmup(iterations = 1, time = 1)
+    @Measurement(iterations = 1, time = 1)
+    public void measureQuerying() {
+        for (String word : queryWords) {
+            storage.search(word);
+        }
+    }
+
+    private Path findFile(int bookId, String suffix) {
+        if (!Files.exists(DATALAKE_ROOT)) return null;
+        try (Stream<Path> stream = Files.walk(DATALAKE_ROOT)) {
+            return stream
+                    .filter(Files::isRegularFile)
+                    .filter(p -> p.getFileName().toString().equals(bookId + suffix))
+                    .findFirst()
+                    .orElse(null);
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    private static List<Integer> loadBookIds(Path path) throws IOException {
         List<String> lines = loadLines(path);
-        List<Integer> ids  = new ArrayList<>(lines.size());
-
+        List<Integer> ids = new ArrayList<>(lines.size());
         for (String line : lines) {
             try {
                 ids.add(Integer.parseInt(line));
             } catch (NumberFormatException e) {
-                System.err.println("[BENCHMARK] Skipping non-integer line in books.txt: \"" + line + "\"");
+                System.err.println("[BENCHMARK] Skipping non-integer in books.txt: \"" + line + "\"");
             }
         }
-
-        System.out.println("[BENCHMARK] Loaded " + ids.size() + " book IDs from " + path);
         return Collections.unmodifiableList(ids);
     }
 
-    /**
-     * Lee {@code words.txt} y devuelve exactamente las primeras 10 palabras
-     * del workload (el benchmark siempre trabaja con 10 terminos).
-     *
-     * @return lista inmutable de palabras (max 10)
-     * @throws IOException si el archivo no puede leerse
-     */
-    public static List<String> loadWords() throws IOException {
-        return loadWords(WORDS_PATH);
-    }
-
-    /**
-     * Sobrecarga que acepta una ruta personalizada (util para tests).
-     *
-     * @param path ruta al archivo {@code words.txt}
-     * @return lista inmutable de palabras (max 10)
-     * @throws IOException si el archivo no puede leerse
-     */
-    public static List<String> loadWords(Path path) throws IOException {
+    private static List<String> loadWords(Path path) throws IOException {
         List<String> lines = loadLines(path);
-
         if (lines.size() > 10) {
-            System.err.println("[BENCHMARK] words.txt has " + lines.size()
-                    + " entries; only the first 10 will be used.");
             lines = lines.subList(0, 10);
         }
-
-        System.out.println("[BENCHMARK] Loaded " + lines.size() + " words from " + path + ": " + lines);
         return Collections.unmodifiableList(lines);
     }
 
-    // -------------------------------------------------------------------------
-    // Punto de entrada
-    // -------------------------------------------------------------------------
-
-    /**
-     * Ejecuta el benchmark completo para todas las escalas obligatorias.
-     *
-     * @param args argumentos de linea de comandos (no se usan actualmente)
-     */
-    public static void main(String[] args) {
-        System.out.println("=============================================================");
-        System.out.println("  Search Engine Benchmark — Java implementation");
-        System.out.println("=============================================================");
-
-        try {
-            // 1. Cargar configuracion
-            List<Integer> bookIds = loadBookIds();
-            List<String>  words   = loadWords();
-
-            if (bookIds.isEmpty()) {
-                System.err.println("[BENCHMARK] No book IDs found. Aborting.");
-                return;
-            }
-            if (words.isEmpty()) {
-                System.err.println("[BENCHMARK] No words found. Aborting.");
-                return;
-            }
-
-            // 2. Ejecutar para cada escala obligatoria
-            for (int scale : SCALES) {
-                System.out.println("\n--- Scale: " + scale + " books ---");
-
-                long t0 = System.currentTimeMillis();
-                List<Integer> syntheticIds = SyntheticDataGenerator.generateScale(bookIds, scale);
-                long elapsed = System.currentTimeMillis() - t0;
-
-                System.out.printf("[BENCHMARK] Scale %,d ready in %d ms (%d synthetic IDs generated)%n",
-                        scale, elapsed, syntheticIds.size() - bookIds.size());
-
-                // TODO Stage-2: construir indice + ejecutar busquedas + medir tiempos
-            }
-
-            System.out.println("\n=============================================================");
-            System.out.println("  Benchmark finished.");
-            System.out.println("=============================================================");
-
-        } catch (Exception e) {
-            System.err.println("[BENCHMARK] Fatal error: " + e.getMessage());
-            e.printStackTrace();
+    private static List<String> loadLines(Path path) throws IOException {
+        if (!Files.exists(path)) {
+            throw new IOException("[BENCHMARK] Config file not found: " + path.toAbsolutePath());
         }
+        List<String> result = new ArrayList<>();
+        for (String line : Files.readAllLines(path)) {
+            String trimmed = line.trim();
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) continue;
+            result.add(trimmed);
+        }
+        return result;
     }
 }

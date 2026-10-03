@@ -11,16 +11,19 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class SqliteIndexStorage implements InvertedIndexStorage {
 
     private static final String DB_PATH = "data/datamarts/inverted_index.db";
-    private static final String DB_URL  = "jdbc:sqlite:" + DB_PATH;
+    private static final String DB_URL = "jdbc:sqlite:" + DB_PATH;
+    private static final int BATCH_SIZE = 10000;
 
     private static final String DDL =
             "CREATE TABLE IF NOT EXISTS inverted_index ("
-            + "term    TEXT    NOT NULL, "
+            + "term TEXT NOT NULL, "
             + "book_id INTEGER NOT NULL, "
             + "PRIMARY KEY (term, book_id)"
             + ");";
@@ -31,32 +34,67 @@ public class SqliteIndexStorage implements InvertedIndexStorage {
     private static final String SELECT =
             "SELECT book_id FROM inverted_index WHERE term = ? ORDER BY book_id";
 
+    private Connection writeConnection;
+    private PreparedStatement writeStatement;
+    private int batchCount = 0;
+
     public SqliteIndexStorage() {
-        initSchema();
+        initSchema(DB_URL);
+        initPersistentConnection();
     }
 
     public SqliteIndexStorage(String dbUrl) {
         initSchema(dbUrl);
+        initPersistentConnection();
+    }
+
+    private void initPersistentConnection() {
+        try {
+            writeConnection = DriverManager.getConnection(DB_URL);
+            try (Statement stmt = writeConnection.createStatement()) {
+                stmt.execute("PRAGMA synchronous = OFF");
+                stmt.execute("PRAGMA journal_mode = MEMORY");
+                stmt.execute("PRAGMA temp_store = MEMORY");
+            }
+            writeConnection.setAutoCommit(false);
+            writeStatement = writeConnection.prepareStatement(INSERT);
+        } catch (SQLException e) {
+            System.err.println(e.getMessage());
+        }
     }
 
     @Override
     public void save(int bookId, List<String> terms) {
-        if (terms == null || terms.isEmpty()) return;
-        try (Connection conn = DriverManager.getConnection(DB_URL);
-             PreparedStatement pstmt = conn.prepareStatement(INSERT)) {
-            conn.setAutoCommit(false);
-            for (String term : terms) {
-                pstmt.setString(1, term);
-                pstmt.setInt(2, bookId);
-                pstmt.addBatch();
+        if (terms == null || terms.isEmpty()) {
+            return;
+        }
+
+        Set<String> uniqueTerms = new HashSet<>(terms);
+        try {
+            for (String term : uniqueTerms) {
+                writeStatement.setString(1, term);
+                writeStatement.setInt(2, bookId);
+                writeStatement.addBatch();
+                batchCount++;
+
+                if (batchCount >= BATCH_SIZE) {
+                    writeStatement.executeBatch();
+                    writeConnection.commit();
+                    writeStatement.clearBatch();
+                    batchCount = 0;
+                }
             }
-            pstmt.executeBatch();
-            conn.commit();
-            System.out.println("[SQLITE-INDEX] Saved " + terms.size()
-                    + " terms for book " + bookId);
+            writeStatement.executeBatch();
+            writeConnection.commit();
+            writeStatement.clearBatch();
+            batchCount = 0;
         } catch (SQLException e) {
-            System.err.println("[SQLITE-INDEX] Error saving terms for book "
-                    + bookId + ": " + e.getMessage());
+            try {
+                writeConnection.rollback();
+            } catch (SQLException rollbackEx) {
+                System.err.println(rollbackEx.getMessage());
+            }
+            System.err.println(e.getMessage());
         }
     }
 
@@ -72,14 +110,9 @@ public class SqliteIndexStorage implements InvertedIndexStorage {
                 }
             }
         } catch (SQLException e) {
-            System.err.println("[SQLITE-INDEX] Error searching term '"
-                    + term + "': " + e.getMessage());
+            System.err.println(e.getMessage());
         }
         return Collections.unmodifiableList(result);
-    }
-
-    private void initSchema() {
-        initSchema(DB_URL);
     }
 
     private void initSchema(String url) {
@@ -87,11 +120,13 @@ public class SqliteIndexStorage implements InvertedIndexStorage {
             Files.createDirectories(Paths.get(DB_PATH).getParent());
             try (Connection conn = DriverManager.getConnection(url);
                  Statement stmt = conn.createStatement()) {
+                stmt.execute("PRAGMA synchronous = OFF");
+                stmt.execute("PRAGMA journal_mode = MEMORY");
+                stmt.execute("PRAGMA temp_store = MEMORY");
                 stmt.execute(DDL);
-                System.out.println("[SQLITE-INDEX] Schema validated: " + url);
             }
         } catch (IOException | SQLException e) {
-            System.err.println("[SQLITE-INDEX] Schema init failed: " + e.getMessage());
+            System.err.println(e.getMessage());
         }
     }
 }
