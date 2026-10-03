@@ -1,5 +1,8 @@
 package com.thescratchers.searchengine.datamarts.index;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -9,175 +12,86 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
-import java.util.StringJoiner;
 
-/**
- * Implementacion de {@link InvertedIndexStorage} que persiste el indice
- * invertido en una base de datos SQLite local.
- *
- * <p><b>Esquema:</b>
- * <pre>
- * CREATE TABLE inverted_index (
- *     term     TEXT PRIMARY KEY,
- *     book_ids TEXT NOT NULL   -- IDs separados por comas, e.g. "1,42,300"
- * );
- * </pre>
- * </p>
- *
- * <p><b>Decisiones de diseno:</b>
- * <ul>
- *   <li>Los IDs se almacenan como CSV en una columna TEXT para minimizar el
- *       numero de filas y simplificar las lecturas de busqueda.</li>
- *   <li>{@code INSERT OR REPLACE} garantiza idempotencia: si el termino ya
- *       existe, se sobreescribe con la lista actualizada.</li>
- *   <li>La inicializacion de la tabla se realiza en el constructor, por lo que
- *       la base de datos esta lista desde el primer uso.</li>
- * </ul>
- * </p>
- *
- * <p>Dependencia en pom.xml: {@code org.xerial:sqlite-jdbc}</p>
- */
 public class SqliteIndexStorage implements InvertedIndexStorage {
 
-    private static final String DEFAULT_DB_URL = "jdbc:sqlite:../data/datamarts/inverted_index.db";
+    private static final String DB_PATH = "data/datamarts/inverted_index.db";
+    private static final String DB_URL  = "jdbc:sqlite:" + DB_PATH;
 
-    private final String dbUrl;
+    private static final String DDL =
+            "CREATE TABLE IF NOT EXISTS inverted_index ("
+            + "term    TEXT    NOT NULL, "
+            + "book_id INTEGER NOT NULL, "
+            + "PRIMARY KEY (term, book_id)"
+            + ");";
 
-    /** Constructor con ruta de base de datos por defecto. */
+    private static final String INSERT =
+            "INSERT OR IGNORE INTO inverted_index (term, book_id) VALUES (?, ?)";
+
+    private static final String SELECT =
+            "SELECT book_id FROM inverted_index WHERE term = ? ORDER BY book_id";
+
     public SqliteIndexStorage() {
-        this(DEFAULT_DB_URL);
+        initSchema();
     }
 
-    /**
-     * Constructor que permite inyectar la URL JDBC (util para tests con base de
-     * datos en memoria: {@code "jdbc:sqlite::memory:"}).
-     *
-     * @param dbUrl URL JDBC de SQLite
-     */
     public SqliteIndexStorage(String dbUrl) {
-        this.dbUrl = dbUrl;
-        initDatabase();
+        initSchema(dbUrl);
     }
 
-    // -------------------------------------------------------------------------
-    // InvertedIndexStorage
-    // -------------------------------------------------------------------------
-
-    /**
-     * Persiste el indice completo en SQLite.
-     *
-     * <p>Cada termino se guarda en una fila; sus IDs de libro se serializan
-     * como una cadena CSV. La operacion {@code INSERT OR REPLACE} hace que la
-     * llamada sea idempotente.</p>
-     *
-     * @param index mapa termino -> lista ordenada de IDs de libro
-     */
     @Override
-    public void save(Map<String, List<Integer>> index) {
-        if (index.isEmpty()) return;
-
-        String sql = "INSERT OR REPLACE INTO inverted_index (term, book_ids) VALUES (?, ?)";
-
-        try (Connection conn = DriverManager.getConnection(dbUrl);
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-
-            // Batch insert para mejor rendimiento
+    public void save(int bookId, List<String> terms) {
+        if (terms == null || terms.isEmpty()) return;
+        try (Connection conn = DriverManager.getConnection(DB_URL);
+             PreparedStatement pstmt = conn.prepareStatement(INSERT)) {
             conn.setAutoCommit(false);
-
-            for (Map.Entry<String, List<Integer>> entry : index.entrySet()) {
-                pstmt.setString(1, entry.getKey());
-                pstmt.setString(2, idsToString(entry.getValue()));
+            for (String term : terms) {
+                pstmt.setString(1, term);
+                pstmt.setInt(2, bookId);
                 pstmt.addBatch();
             }
-
             pstmt.executeBatch();
             conn.commit();
-
-            System.out.println("[SQLITE-STORAGE] Index saved: " + index.size() + " terms -> " + dbUrl);
-
+            System.out.println("[SQLITE-INDEX] Saved " + terms.size()
+                    + " terms for book " + bookId);
         } catch (SQLException e) {
-            System.err.println("[SQLITE-STORAGE] Error saving index: " + e.getMessage());
-            e.printStackTrace();
+            System.err.println("[SQLITE-INDEX] Error saving terms for book "
+                    + bookId + ": " + e.getMessage());
         }
     }
 
-    /**
-     * Recupera los IDs de libros que contienen el termino dado.
-     *
-     * @param term termino de busqueda (se espera en minusculas)
-     * @return lista de IDs de libro, o lista vacia si el termino no existe
-     */
     @Override
     public List<Integer> search(String term) {
-        String sql = "SELECT book_ids FROM inverted_index WHERE term = ?";
-
-        try (Connection conn = DriverManager.getConnection(dbUrl);
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-
+        List<Integer> result = new ArrayList<>();
+        try (Connection conn = DriverManager.getConnection(DB_URL);
+             PreparedStatement pstmt = conn.prepareStatement(SELECT)) {
             pstmt.setString(1, term.toLowerCase());
-
             try (ResultSet rs = pstmt.executeQuery()) {
-                if (rs.next()) {
-                    return stringToIds(rs.getString("book_ids"));
+                while (rs.next()) {
+                    result.add(rs.getInt("book_id"));
                 }
             }
-
         } catch (SQLException e) {
-            System.err.println("[SQLITE-STORAGE] Error searching term '" + term + "': " + e.getMessage());
-            e.printStackTrace();
+            System.err.println("[SQLITE-INDEX] Error searching term '"
+                    + term + "': " + e.getMessage());
         }
-
-        return Collections.emptyList();
+        return Collections.unmodifiableList(result);
     }
 
-    // -------------------------------------------------------------------------
-    // Privado
-    // -------------------------------------------------------------------------
-
-    /**
-     * Crea la tabla {@code inverted_index} si no existe todavia.
-     * Se ejecuta una sola vez en el constructor.
-     */
-    private void initDatabase() {
-        String ddl = "CREATE TABLE IF NOT EXISTS inverted_index ("
-                + "term     TEXT PRIMARY KEY, "
-                + "book_ids TEXT NOT NULL"
-                + ");";
-
-        try (Connection conn  = DriverManager.getConnection(dbUrl);
-             Statement   stmt = conn.createStatement()) {
-
-            stmt.execute(ddl);
-            System.out.println("[SQLITE-STORAGE] Schema validated: " + dbUrl);
-
-        } catch (SQLException e) {
-            System.err.println("[SQLITE-STORAGE] Error initializing schema: " + e.getMessage());
-            e.printStackTrace();
-        }
+    private void initSchema() {
+        initSchema(DB_URL);
     }
 
-    /** Convierte una lista de IDs a cadena CSV: [1, 42, 300] -> "1,42,300". */
-    private static String idsToString(List<Integer> ids) {
-        StringJoiner joiner = new StringJoiner(",");
-        for (Integer id : ids) {
-            joiner.add(String.valueOf(id));
-        }
-        return joiner.toString();
-    }
-
-    /** Convierte una cadena CSV de IDs a lista: "1,42,300" -> [1, 42, 300]. */
-    private static List<Integer> stringToIds(String csv) {
-        if (csv == null || csv.isBlank()) return Collections.emptyList();
-
-        String[] parts = csv.split(",");
-        List<Integer> ids = new ArrayList<>(parts.length);
-        for (String part : parts) {
-            String trimmed = part.trim();
-            if (!trimmed.isEmpty()) {
-                ids.add(Integer.parseInt(trimmed));
+    private void initSchema(String url) {
+        try {
+            Files.createDirectories(Paths.get(DB_PATH).getParent());
+            try (Connection conn = DriverManager.getConnection(url);
+                 Statement stmt = conn.createStatement()) {
+                stmt.execute(DDL);
+                System.out.println("[SQLITE-INDEX] Schema validated: " + url);
             }
+        } catch (IOException | SQLException e) {
+            System.err.println("[SQLITE-INDEX] Schema init failed: " + e.getMessage());
         }
-        return Collections.unmodifiableList(ids);
     }
 }

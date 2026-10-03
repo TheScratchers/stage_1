@@ -12,11 +12,26 @@ import java.time.format.DateTimeFormatter;
 import java.util.regex.Pattern;
 
 public class Downloader {
-    private static final String START_MARKER = "*** START OF THE PROJECT GUTENBERG EBOOK";
-    private static final String END_MARKER   = "*** END OF THE PROJECT GUTENBERG EBOOK";
-    private static final String DATALAKE_PATH = "../data/datalake/";
 
-    public static boolean downloadBook(int bookId, String url) {
+    private static final String GUTENBERG_URL_TEMPLATE =
+            "https://www.gutenberg.org/cache/epub/%d/pg%d.txt";
+
+    private static final String START_MARKER =
+            "*** START OF THE PROJECT GUTENBERG EBOOK";
+
+    private static final String END_MARKER =
+            "*** END OF THE PROJECT GUTENBERG EBOOK";
+
+    private static final String DATALAKE_ROOT = "data/datalake/";
+
+    private static final DateTimeFormatter DATE_FORMAT =
+            DateTimeFormatter.ofPattern("yyyyMMdd");
+
+    private static final DateTimeFormatter HOUR_FORMAT =
+            DateTimeFormatter.ofPattern("HH");
+
+    public boolean downloadBook(int bookId) {
+        String url = String.format(GUTENBERG_URL_TEMPLATE, bookId, bookId);
         try {
             HttpClient client = HttpClient.newBuilder()
                     .followRedirects(HttpClient.Redirect.NORMAL)
@@ -24,37 +39,52 @@ public class Downloader {
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
+                    .GET()
                     .build();
 
-            System.out.println("[DOWNLOADER] Fetching book ID " + bookId + " from: " + url);
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-            String text = response.body();
+            System.out.println("[DOWNLOADER] Fetching book " + bookId + " from: " + url);
 
-            if (!text.contains(START_MARKER) || !text.contains(END_MARKER)) {
-                System.out.println("[DOWNLOADER] Error: Gutenberg markers not found in the text.");
+            HttpResponse<String> response =
+                    client.send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() != 200) {
+                System.err.println("[DOWNLOADER] HTTP " + response.statusCode()
+                        + " for book " + bookId);
                 return false;
             }
 
-            String[] headerAndRest = text.split(Pattern.quote(START_MARKER), 2);
-            String header = headerAndRest[0];
-            String[] bodyAndFooter = headerAndRest[1].split(Pattern.quote(END_MARKER), 2);
-            String body = bodyAndFooter[0];
+            String rawText = response.body();
+
+            if (!rawText.contains(START_MARKER) || !rawText.contains(END_MARKER)) {
+                System.err.println("[DOWNLOADER] Gutenberg markers not found for book " + bookId);
+                return false;
+            }
+
+            String[] beforeAndAfterStart =
+                    rawText.split(Pattern.quote(START_MARKER), 2);
+            String header = beforeAndAfterStart[0].trim();
+
+            String[] bodyAndFooter =
+                    beforeAndAfterStart[1].split(Pattern.quote(END_MARKER), 2);
+            String body = bodyAndFooter[0].trim();
 
             LocalDateTime now = LocalDateTime.now();
-            String dateFolder = now.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
-            String hourFolder = now.format(DateTimeFormatter.ofPattern("HH"));
+            Path outputDir = Paths.get(
+                    DATALAKE_ROOT,
+                    now.format(DATE_FORMAT),
+                    now.format(HOUR_FORMAT));
 
-            Path outputPath = Paths.get(DATALAKE_PATH, dateFolder, hourFolder);
-            Files.createDirectories(outputPath);
+            Files.createDirectories(outputDir);
+            Files.writeString(outputDir.resolve(bookId + ".header.txt"), header);
+            Files.writeString(outputDir.resolve(bookId + ".body.txt"), body);
 
-            Files.writeString(outputPath.resolve(bookId + ".header.txt"), header.trim());
-            Files.writeString(outputPath.resolve(bookId + ".body.txt"),   body.trim());
-
-            System.out.println("[DOWNLOADER] Successfully saved to: " + outputPath.toString());
+            System.out.println("[DOWNLOADER] Book " + bookId
+                    + " saved to: " + outputDir.toAbsolutePath());
             return true;
+
         } catch (Exception e) {
-            System.err.println("[DOWNLOADER] Failed to download book ID " + bookId);
-            e.printStackTrace();
+            System.err.println("[DOWNLOADER] Failed to download book " + bookId
+                    + ": " + e.getMessage());
             return false;
         }
     }

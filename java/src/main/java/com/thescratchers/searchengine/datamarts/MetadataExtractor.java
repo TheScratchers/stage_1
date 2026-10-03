@@ -7,113 +7,89 @@ import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Stream;
 
 public class MetadataExtractor {
 
-    private static final String DB_URL = "jdbc:sqlite:../data/datamarts/metadata.db";
+    private static final String DB_PATH = "data/datamarts/metadata.db";
+    private static final String DB_URL  = "jdbc:sqlite:" + DB_PATH;
 
-    public static class BookMetadata {
-        public int    bookId;
-        public String title;
-        public String author;
-        public String language;
+    private static final String DDL =
+            "CREATE TABLE IF NOT EXISTS books ("
+            + "book_id  INTEGER PRIMARY KEY, "
+            + "title    TEXT, "
+            + "author   TEXT, "
+            + "language TEXT"
+            + ");";
 
-        public BookMetadata(int bookId, String title, String author, String language) {
-            this.bookId   = bookId;
-            this.title    = title;
-            this.author   = author;
-            this.language = language;
-        }
+    private static final String UPSERT =
+            "INSERT OR REPLACE INTO books (book_id, title, author, language) "
+            + "VALUES (?, ?, ?, ?)";
+
+    private static final Pattern TITLE_PATTERN =
+            Pattern.compile("^Title:\\s*(.+)$", Pattern.MULTILINE | Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern AUTHOR_PATTERN =
+            Pattern.compile("^Author:\\s*(.+)$", Pattern.MULTILINE | Pattern.CASE_INSENSITIVE);
+
+    private static final Pattern LANGUAGE_PATTERN =
+            Pattern.compile("^Language:\\s*(.+)$", Pattern.MULTILINE | Pattern.CASE_INSENSITIVE);
+
+    public MetadataExtractor() {
+        initSchema();
     }
 
-    private static void initDatabase() {
-        String createTableSQL = "CREATE TABLE IF NOT EXISTS books ("
-                + "book_id INTEGER PRIMARY KEY, "
-                + "title TEXT, "
-                + "author TEXT, "
-                + "language TEXT"
-                + ");";
+    public void extractAndStoreMetadata(int bookId, String headerFilePath)
+            throws IOException, SQLException {
 
+        Path headerPath = Paths.get(headerFilePath);
+        if (!Files.exists(headerPath)) {
+            throw new IOException("Header file not found: " + headerPath.toAbsolutePath());
+        }
+
+        String content = Files.readString(headerPath);
+
+        String title    = extractField(content, TITLE_PATTERN);
+        String author   = extractField(content, AUTHOR_PATTERN);
+        String language = extractField(content, LANGUAGE_PATTERN);
+
+        upsert(bookId, title, author, language);
+
+        System.out.println("[METADATA] Book " + bookId
+                + " stored — title=\"" + title + "\""
+                + ", author=\"" + author + "\""
+                + ", language=\"" + language + "\"");
+    }
+
+    private void initSchema() {
         try {
-            // 1. Crear la estructura de carpetas ANTES de la conexion
-            Files.createDirectories(Paths.get("../data/datamarts"));
-
-            // 2. Conectar a SQLite (crea el archivo metadata.db automaticamente)
+            Files.createDirectories(Paths.get(DB_PATH).getParent());
             try (Connection conn = DriverManager.getConnection(DB_URL);
                  Statement  stmt = conn.createStatement()) {
-
-                stmt.execute(createTableSQL);
-                System.out.println("[METADATA] Database and schema validated.");
+                stmt.execute(DDL);
             }
-        } catch (Exception e) {
-            System.err.println("[METADATA] Error initializing database: " + e.getMessage());
+        } catch (IOException | SQLException e) {
+            System.err.println("[METADATA] Schema init failed: " + e.getMessage());
         }
     }
 
-    private static void insertMetadata(BookMetadata metadata) {
-        String insertSQL = "INSERT OR REPLACE INTO books (book_id, title, author, language) VALUES (?, ?, ?, ?)";
-
-        try (Connection conn  = DriverManager.getConnection(DB_URL);
-             PreparedStatement pstmt = conn.prepareStatement(insertSQL)) {
-
-            pstmt.setInt(1, metadata.bookId);
-            pstmt.setString(2, metadata.title);
-            pstmt.setString(3, metadata.author);
-            pstmt.setString(4, metadata.language);
+    private void upsert(int bookId, String title, String author, String language)
+            throws SQLException {
+        try (Connection conn = DriverManager.getConnection(DB_URL);
+             PreparedStatement pstmt = conn.prepareStatement(UPSERT)) {
+            pstmt.setInt(1, bookId);
+            pstmt.setString(2, title);
+            pstmt.setString(3, author);
+            pstmt.setString(4, language);
             pstmt.executeUpdate();
-
-            System.out.println("[METADATA] Successfully inserted book " + metadata.bookId + " into database.");
-
-        } catch (Exception e) {
-            System.err.println("[METADATA] Error inserting into database: " + e.getMessage());
         }
     }
 
-    private static Path findHeaderFile(int bookId) throws IOException {
-        Path datalakePath = Paths.get("../data/datalake/");
-        if (!Files.exists(datalakePath)) return null;
-
-        try (Stream<Path> paths = Files.walk(datalakePath)) {
-            return paths.filter(Files::isRegularFile)
-                        .filter(p -> p.getFileName().toString().equals(bookId + ".header.txt"))
-                        .findFirst()
-                        .orElse(null);
-        }
-    }
-
-    private static String extractField(String text, String regex) {
-        Pattern pattern = Pattern.compile(regex, Pattern.CASE_INSENSITIVE);
+    private static String extractField(String text, Pattern pattern) {
         Matcher matcher = pattern.matcher(text);
-        if (matcher.find()) {
-            return matcher.group(1).trim();
-        }
-        return "Unknown";
-    }
-
-    public static void processBook(int bookId) {
-        initDatabase();
-        try {
-            Path headerPath = findHeaderFile(bookId);
-            if (headerPath == null) {
-                System.out.println("[METADATA] Error: No header file found for book ID " + bookId);
-                return;
-            }
-
-            String content  = Files.readString(headerPath);
-            String title    = extractField(content, "Title:\\s*(.*)");
-            String author   = extractField(content, "Author:\\s*(.*)");
-            String language = extractField(content, "Language:\\s*(.*)");
-
-            BookMetadata metadata = new BookMetadata(bookId, title, author, language);
-            insertMetadata(metadata);
-
-        } catch (Exception e) {
-            System.err.println("[METADATA] Failed to process metadata for book " + bookId);
-            e.printStackTrace();
-        }
+        return matcher.find() ? matcher.group(1).trim() : "Unknown";
     }
 }
