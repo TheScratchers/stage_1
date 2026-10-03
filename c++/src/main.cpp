@@ -131,13 +131,22 @@ int main(int argc, char* argv[]) {
                               "Alice was beginning to get very tired of sitting by her sister on the bank.");
         ctrl.ingestSampleBook(84, "Title: Frankenstein\nAuthor: Mary Shelley\nLanguage: English\n",
                               "You will rejoice to hear that no disaster has accompanied the commencement of an enterprise.");
-        ctrl.run(3);
+        ctrl.indexBook(1342);
+        ctrl.indexBook(11);
+        ctrl.indexBook(84);
+        ctrl.syncDatamarts();
 
         auto rJson = QueryEngine::searchSingle("sister", IndexType::Json, (mPath / "inverted_index.json").string());
         auto rHier = QueryEngine::searchSingle("sister", IndexType::Hierarchical, (mPath / "inverted_index_hier").string());
         auto rSql  = QueryEngine::searchSingle("sister", IndexType::Sqlite, (mPath / "inverted_index.db").string());
         std::cout << "\n>>> Sample test complete! 'sister' matches -> JSON: " << rJson.size()
                   << " | Hierarchical: " << rHier.size() << " | SQLite: " << rSql.size() << "\n";
+        return 0;
+    }
+
+    if (cmd == "sync") {
+        ctrl.syncDatamarts();
+        std::cout << "Datamarts synchronized successfully across JSON, Hierarchical, and SQLite.\n";
         return 0;
     }
 

@@ -16,6 +16,8 @@ public:
     bool step();
     void run(int steps);
     bool ingestSampleBook(int bookId, const std::string& header, const std::string& body);
+    void syncDatamarts();
+    bool indexBook(int bookId);
 
     std::filesystem::path getControlPath() const { return controlPath; }
     std::filesystem::path getDatalakePath() const { return datalakePath; }
@@ -27,6 +29,5 @@ public:
 private:
     std::filesystem::path controlPath, downloadedFile, indexedFile, datalakePath, datamartPath;
     bool downloadBook(int bookId);
-    bool indexBook(int bookId);
     void resolvePaths(const std::string& cDir, const std::string& lDir, const std::string& mDir);
 };
