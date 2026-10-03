@@ -122,9 +122,15 @@ def benchmark_structure(name: str, path_fn, book_ids, content_by_real_id):
     # 1. Write throughput
     t0 = time.perf_counter()
     for i, book_id in enumerate(book_ids):
-        # Cycle through the 20 contract books so every synthetic id
-        # gets genuine header/body content instead of empty/dummy text.
-        real_id = REAL_BOOK_IDS[book_id % len(REAL_BOOK_IDS)]
+        # Cross-language contract rule (see ../shared/CONTRACT.md
+        # Section 4.1): the i-th synthetic book (0-indexed POSITION in
+        # this scale, not its numeric id) replicates the content of
+        # the real book at REAL_BOOK_IDS[i % 20], in books.txt's
+        # listed order. Keyed on position rather than on the numeric
+        # book_id itself so the mapping can never silently drift if
+        # book_id's starting offset ever changes - Java and C++ do the
+        # same (see CONTRACT.md for the verified cross-check).
+        real_id = REAL_BOOK_IDS[i % len(REAL_BOOK_IDS)]
         header, body = content_by_real_id[real_id]
         out_dir = path_fn(str(base_dir), book_id)
         save_book(book_id, header, body, str(out_dir))
@@ -167,21 +173,28 @@ def benchmark_structure(name: str, path_fn, book_ids, content_by_real_id):
     # those - exactly what control.py has to do against a real datalake.
     incremental_n = max(1, len(book_ids) // 10)
     last_id = book_ids[-1] if book_ids else -1
-    incremental_candidates = book_ids[len(book_ids) // 2:] + list(
+    half_point = len(book_ids) // 2
+    incremental_candidates = book_ids[half_point:] + list(
         range(last_id + 1, last_id + 1 + incremental_n)
     )
     t0 = time.perf_counter()
-    new_ids = []
-    for book_id in incremental_candidates:
+    # (position, book_id) pairs, not just book_id: incremental_candidates
+    # mixes already-written ids (continuing their original position in
+    # book_ids, starting at half_point) with brand-new ones that extend
+    # the same position sequence past len(book_ids) - so position j in
+    # this list is always half_point + j, letting the same "position %
+    # 20" content rule apply seamlessly to the new ones below.
+    new_entries = []
+    for j, book_id in enumerate(incremental_candidates):
         out_dir = path_fn(str(base_dir), book_id)
         body_path = Path(out_dir) / f"{book_id}.body.txt"
         if not body_path.exists():
-            new_ids.append(book_id)
+            new_entries.append((half_point + j, book_id))
     incremental_detect_elapsed = time.perf_counter() - t0
 
     t0 = time.perf_counter()
-    for book_id in new_ids:
-        real_id = REAL_BOOK_IDS[book_id % len(REAL_BOOK_IDS)]
+    for position, book_id in new_entries:
+        real_id = REAL_BOOK_IDS[position % len(REAL_BOOK_IDS)]
         header, body = content_by_real_id[real_id]
         out_dir = path_fn(str(base_dir), book_id)
         save_book(book_id, header, body, str(out_dir))
@@ -195,20 +208,20 @@ def benchmark_structure(name: str, path_fn, book_ids, content_by_real_id):
     shutil.rmtree(base_dir)
     base_dir.mkdir(parents=True)
     half = len(book_ids) // 2
-    for book_id in book_ids[:half]:
-        real_id = REAL_BOOK_IDS[book_id % len(REAL_BOOK_IDS)]
+    for i, book_id in enumerate(book_ids[:half]):
+        real_id = REAL_BOOK_IDS[i % len(REAL_BOOK_IDS)]
         header, body = content_by_real_id[real_id]
         out_dir = path_fn(str(base_dir), book_id)
         save_book(book_id, header, body, str(out_dir))
 
     t0 = time.perf_counter()
     resumed_count = 0
-    for book_id in book_ids:
+    for i, book_id in enumerate(book_ids):
         out_dir = path_fn(str(base_dir), book_id)
         body_path = Path(out_dir) / f"{book_id}.body.txt"
         if body_path.exists():
             continue  # already written before the simulated crash - skip
-        real_id = REAL_BOOK_IDS[book_id % len(REAL_BOOK_IDS)]
+        real_id = REAL_BOOK_IDS[i % len(REAL_BOOK_IDS)]
         header, body = content_by_real_id[real_id]
         save_book(book_id, header, body, str(out_dir))
         resumed_count += 1

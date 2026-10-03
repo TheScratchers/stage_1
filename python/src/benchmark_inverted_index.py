@@ -162,12 +162,19 @@ def build_synthetic_datalake(n_books: int, real_book_ids, start_id: int = 200000
     # benchmark_datalake.py's own synthetic range), so these ids can
     # never be confused with real or other synthetic ones.
     book_ids = list(range(start_id, start_id + n_books))
-    for book_id in book_ids:
-        # Cycling through real_book_ids means the vocabulary is fixed
-        # by CONTENT diversity (how many distinct real books we use),
-        # not by n_books - adding more synthetic ids just adds more
-        # book_ids to the postings lists of terms that already exist.
-        real_id = real_book_ids[book_id % len(real_book_ids)]
+    for i, book_id in enumerate(book_ids):
+        # Cross-language contract rule (see ../shared/CONTRACT.md
+        # Section 4.1): the i-th synthetic book (0-indexed POSITION,
+        # not its numeric id) replicates the content of the real book
+        # at real_book_ids[i % 20], in books.txt's listed order. Keyed
+        # on position rather than on the numeric book_id itself so the
+        # mapping never silently drifts if start_id ever changes - this
+        # is also what makes the vocabulary fixed by CONTENT diversity
+        # (how many distinct real books we use), not by n_books: adding
+        # more synthetic ids just adds more book_ids to the postings
+        # lists of terms that already exist. Java and C++ do the same
+        # (verified directly against both branches' current code).
+        real_id = real_book_ids[i % len(real_book_ids)]
         text = bodies[real_id]
         (SYNTHETIC_DATALAKE / f"{book_id}.body.txt").write_text(text, encoding="utf-8")
     return book_ids
