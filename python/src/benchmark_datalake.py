@@ -8,11 +8,19 @@ that Java and C++ must also use, so results are comparable across
 languages (see shared_contract.py for how these are loaded).
 
 Metrics measured for each structure, at each scale:
-  1. Write throughput  -> time to ingest N books (seconds, books/sec)
-  2. Lookup cost        -> time to locate + read a sample of book_ids
-  3. Storage overhead   -> number of directories created, avg files/dir,
-                           max directory depth
-  4. Scalability        -> the trend across the 3 contract scales
+  1. Write throughput        -> time to ingest N books (seconds, books/sec)
+  2. Lookup cost              -> time to locate + read a sample of book_ids
+  3. Storage overhead         -> number of directories created, avg files/dir,
+                                 max directory depth
+  4. Incremental-processing  -> cost of detecting which of a small new
+     cost                       batch of ids are already present vs. new,
+                                 then ingesting just the new ones, on top
+                                 of a structure that's already populated
+  5. Recovery behavior        -> simulates a crash after half of n_books
+                                 is written, then "resumes" and confirms
+                                 the result is complete with no duplicated
+                                 or lost documents
+  6. Scalability               -> the trend across the 3 contract scales
 
 To avoid depending on network access at benchmark time, we reuse the
 real header/body text of the 20 contract books already downloaded
@@ -113,13 +121,23 @@ def benchmark_structure(name: str, path_fn, book_ids, content_by_real_id):
 
     # 1. Write throughput
     t0 = time.perf_counter()
-    for book_id in book_ids:
+    for i, book_id in enumerate(book_ids):
         # Cycle through the 20 contract books so every synthetic id
         # gets genuine header/body content instead of empty/dummy text.
         real_id = REAL_BOOK_IDS[book_id % len(REAL_BOOK_IDS)]
         header, body = content_by_real_id[real_id]
         out_dir = path_fn(str(base_dir), book_id)
         save_book(book_id, header, body, str(out_dir))
+        # Heartbeat for the larger scales - this structure is written
+        # 9 times per full run (3 structures x 3 scales), and without
+        # any output in between it's not obvious which one is running
+        # or whether it's still making progress. 2000 matches this
+        # loop's own pace (this benchmark writes roughly 200 books/sec,
+        # much faster per book than the inverted-index benchmarks, so
+        # a smaller interval like 200 would print almost every second -
+        # too chatty for how fast this particular loop runs).
+        if (i + 1) % 2000 == 0:
+            print(f"    [{name}] ...wrote {i + 1}/{len(book_ids)} books")
     write_elapsed = time.perf_counter() - t0
 
     # 2. Lookup cost: pick N_LOOKUPS random ids, resolve path + read body
@@ -141,6 +159,67 @@ def benchmark_structure(name: str, path_fn, book_ids, content_by_real_id):
     avg_files_per_dir = (sum(files_per_dir) / len(files_per_dir)) if files_per_dir else 0
     max_files_per_dir = max(files_per_dir) if files_per_dir else 0
 
+    # 4. Incremental-processing cost: build a candidate list that mixes
+    # ids already in the structure (the second half of book_ids) with a
+    # small batch of genuinely new ones, then time how long it takes to
+    # DETECT which candidates are new (PDF: "cost of detecting which
+    # books are new and ready to be indexed") before ingesting just
+    # those - exactly what control.py has to do against a real datalake.
+    incremental_n = max(1, len(book_ids) // 10)
+    last_id = book_ids[-1] if book_ids else -1
+    incremental_candidates = book_ids[len(book_ids) // 2:] + list(
+        range(last_id + 1, last_id + 1 + incremental_n)
+    )
+    t0 = time.perf_counter()
+    new_ids = []
+    for book_id in incremental_candidates:
+        out_dir = path_fn(str(base_dir), book_id)
+        body_path = Path(out_dir) / f"{book_id}.body.txt"
+        if not body_path.exists():
+            new_ids.append(book_id)
+    incremental_detect_elapsed = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
+    for book_id in new_ids:
+        real_id = REAL_BOOK_IDS[book_id % len(REAL_BOOK_IDS)]
+        header, body = content_by_real_id[real_id]
+        out_dir = path_fn(str(base_dir), book_id)
+        save_book(book_id, header, body, str(out_dir))
+    incremental_write_elapsed = time.perf_counter() - t0
+
+    # 5. Recovery behavior: wipe the structure and rebuild only the
+    # "pre-crash" first half of book_ids, simulating an interruption
+    # partway through the original ingestion. Then "resume" by walking
+    # the FULL book_ids list again, skipping any id whose file already
+    # exists (idempotent recovery) and only writing what's missing.
+    shutil.rmtree(base_dir)
+    base_dir.mkdir(parents=True)
+    half = len(book_ids) // 2
+    for book_id in book_ids[:half]:
+        real_id = REAL_BOOK_IDS[book_id % len(REAL_BOOK_IDS)]
+        header, body = content_by_real_id[real_id]
+        out_dir = path_fn(str(base_dir), book_id)
+        save_book(book_id, header, body, str(out_dir))
+
+    t0 = time.perf_counter()
+    resumed_count = 0
+    for book_id in book_ids:
+        out_dir = path_fn(str(base_dir), book_id)
+        body_path = Path(out_dir) / f"{book_id}.body.txt"
+        if body_path.exists():
+            continue  # already written before the simulated crash - skip
+        real_id = REAL_BOOK_IDS[book_id % len(REAL_BOOK_IDS)]
+        header, body = content_by_real_id[real_id]
+        save_book(book_id, header, body, str(out_dir))
+        resumed_count += 1
+    recovery_elapsed = time.perf_counter() - t0
+
+    # Correctness check: exactly n_books *.body.txt files afterwards -
+    # no duplicates (each id maps to one deterministic path, so a
+    # duplicate would mean a path collision) and nothing lost.
+    _, _, recovery_files_per_dir = count_dirs_and_depth(base_dir)
+    recovery_ok = sum(recovery_files_per_dir) == len(book_ids)
+
     # Package every measurement into one dict, ready to print and to
     # serialize as JSON.
     return {
@@ -155,6 +234,13 @@ def benchmark_structure(name: str, path_fn, book_ids, content_by_real_id):
         "max_depth": max_depth,
         "avg_files_per_dir": round(avg_files_per_dir, 1),
         "max_files_per_dir": max_files_per_dir,
+        "incremental_candidates": len(incremental_candidates),
+        "incremental_new_found": len(new_ids),
+        "incremental_detect_seconds": round(incremental_detect_elapsed, 4),
+        "incremental_write_seconds": round(incremental_write_elapsed, 4),
+        "recovery_resumed_count": resumed_count,
+        "recovery_seconds": round(recovery_elapsed, 4),
+        "recovery_ok": recovery_ok,
     }
 
 
@@ -170,6 +256,16 @@ def print_table(scale: int, results: list):
             f"{r['structure']:<14}{r['write_seconds']:<12}{r['write_books_per_sec']:<10}"
             f"{r['lookup_avg_ms']:<18}{r['num_dirs_created']:<8}{r['max_depth']:<10}"
             f"{r['avg_files_per_dir']:<14}{r['max_files_per_dir']:<12}"
+        )
+
+    # Separate block for the two newer metrics - they don't fit the
+    # fixed-width table above without making it unreadable.
+    print(f"\n{'Structure':<14}{'Incr. detect (s)':<18}{'Incr. write (s)':<18}{'Recovery (s)':<14}{'Recovery OK':<12}")
+    print("-" * 76)
+    for r in results:
+        print(
+            f"{r['structure']:<14}{r['incremental_detect_seconds']:<18}"
+            f"{r['incremental_write_seconds']:<18}{r['recovery_seconds']:<14}{str(r['recovery_ok']):<12}"
         )
 
 
