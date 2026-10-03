@@ -18,7 +18,16 @@ notes below):
                            every language measures the exact same
                            queries
   3. Storage overhead   -> number of files/dirs, total size on disk
-  4. Scalability        -> the trend across the 3 contract scales
+  4. Update performance -> cost of adding ONE new book to an
+                           already-built index via update_index(),
+                           without rebuilding it from scratch (for
+                           json_monolithic this also times the
+                           full-file rewrite update_index() still
+                           needs to persist, since that's the
+                           structure's real update cost)
+  5. Memory usage        -> peak Python memory (tracemalloc) used
+                           while building each structure
+  6. Scalability        -> the trend across the 3 contract scales
                            (100 / 1,000 / 10,000 books)
 
 Why lookup cost is measured differently per structure:
@@ -62,6 +71,7 @@ import json
 import shutil
 import sys
 import time
+import tracemalloc
 from pathlib import Path
 
 import inverted_index as idx_json
@@ -135,11 +145,15 @@ def dir_size_bytes(root: Path) -> int:
 def benchmark_json(book_ids):
     print("  Building JSON (monolithic) index...")
     # Build time: scan every synthetic body file and write the whole
-    # index out as a single JSON file.
+    # index out as a single JSON file. tracemalloc wraps this to
+    # capture the peak Python memory this structure needs to build.
+    tracemalloc.start()
     t0 = time.perf_counter()
     index = idx_json.build_index(str(SYNTHETIC_DATALAKE))
     idx_json.save_index(index, str(JSON_OUT))
     build_seconds = time.perf_counter() - t0
+    _, peak_bytes = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
 
     # "Cold load" cost: parsing the whole file back from disk, as a
     # fresh process would have to before it can answer any query.
@@ -155,14 +169,34 @@ def benchmark_json(book_ids):
         idx_json.search(loaded, term)
     lookup_seconds = time.perf_counter() - t0
 
+    # Update performance: add ONE new book to the already-loaded index
+    # via update_index() (cheap, in-memory), then persist it with
+    # save_index() - which, for this structure, means rewriting the
+    # WHOLE file, since there's no partial-write option. That full
+    # rewrite is the structure's real update cost, and it's expected
+    # to grow with index size (see Pablo's C++ report, which measures
+    # the same trade-off: an 11s rewrite at 10,000 books).
+    new_book_id = (book_ids[-1] + 1) if book_ids else 0
+    sample_body = (SYNTHETIC_DATALAKE / f"{book_ids[0]}.body.txt").read_text(encoding="utf-8")
+    t0 = time.perf_counter()
+    idx_json.update_index(loaded, new_book_id, sample_body)
+    update_memory_seconds = time.perf_counter() - t0
+    t0 = time.perf_counter()
+    idx_json.save_index(loaded, str(JSON_OUT))
+    update_save_seconds = time.perf_counter() - t0
+
     # Package every measurement into one dict, ready to print and to
     # merge into the results file.
     return {
         "structure": "json_monolithic",
         "n_terms": len(loaded),
         "build_seconds": round(build_seconds, 4),
+        "peak_memory_kb": round(peak_bytes / 1024, 1),
         "cold_load_seconds": round(load_seconds, 4),
         "in_memory_lookup_avg_ms": round((lookup_seconds / len(QUERY_WORDS)) * 1000, 5),
+        "update_memory_seconds": round(update_memory_seconds, 5),
+        "update_save_seconds": round(update_save_seconds, 4),
+        "update_total_seconds": round(update_memory_seconds + update_save_seconds, 4),
         "num_files": 1,
         "total_size_bytes": JSON_OUT.stat().st_size,
     }
@@ -171,10 +205,14 @@ def benchmark_json(book_ids):
 def benchmark_hierarchical(book_ids):
     print("  Building hierarchical (folder-per-letter/file-per-term) index...")
     # Build time: scan every synthetic body file and write one file
-    # per unique term.
+    # per unique term. tracemalloc wraps this to capture the peak
+    # Python memory this structure needs to build.
+    tracemalloc.start()
     t0 = time.perf_counter()
     n_terms = idx_hier.build_index(str(SYNTHETIC_DATALAKE), str(HIER_ROOT))
     build_seconds = time.perf_counter() - t0
+    _, peak_bytes = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
 
     # Every lookup here always means opening a small file from disk -
     # there's no equivalent "load once" step. Same 10 fixed words.
@@ -182,6 +220,15 @@ def benchmark_hierarchical(book_ids):
     for term in QUERY_WORDS:
         idx_hier.search(term, str(HIER_ROOT))
     lookup_seconds = time.perf_counter() - t0
+
+    # Update performance: add ONE new book via update_index(), which
+    # only touches the files of the terms that appear in it - no full
+    # rebuild, unlike the monolithic JSON structure.
+    new_book_id = (book_ids[-1] + 1) if book_ids else 0
+    sample_body = (SYNTHETIC_DATALAKE / f"{book_ids[0]}.body.txt").read_text(encoding="utf-8")
+    t0 = time.perf_counter()
+    idx_hier.update_index(new_book_id, sample_body, str(HIER_ROOT))
+    update_seconds = time.perf_counter() - t0
 
     # Storage overhead: total term-files written, and how many letter
     # subfolders (A/, B/, ...) they're spread across.
@@ -195,7 +242,9 @@ def benchmark_hierarchical(book_ids):
         "structure": "hierarchical",
         "n_terms": n_terms,
         "build_seconds": round(build_seconds, 4),
+        "peak_memory_kb": round(peak_bytes / 1024, 1),
         "avg_lookup_ms": round((lookup_seconds / len(QUERY_WORDS)) * 1000, 5),
+        "update_seconds": round(update_seconds, 5),
         "num_files": num_files,
         "num_dirs": num_dirs,
         "total_size_bytes": dir_size_bytes(HIER_ROOT),
@@ -210,16 +259,31 @@ def benchmark_mongo(book_ids, uri):
 
     print(f"  Building MongoDB index at {uri} ...")
     # Build time: scan every synthetic body file and insert one
-    # document per unique term into MongoDB.
+    # document per unique term into MongoDB. tracemalloc only sees
+    # this process's own Python-side memory (building the postings
+    # dict before sending it to MongoDB), not the separate MongoDB
+    # server's memory - but that's still a fair, consistent "memory
+    # this implementation needs" number across all 3 structures.
+    tracemalloc.start()
     t0 = time.perf_counter()
     n_terms = idx_mongo.build_index(str(SYNTHETIC_DATALAKE), uri)
     build_seconds = time.perf_counter() - t0
+    _, peak_bytes = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
 
     # Same 10 fixed contract words.
     t0 = time.perf_counter()
     for term in QUERY_WORDS:
         idx_mongo.search(term, uri)
     lookup_seconds = time.perf_counter() - t0
+
+    # Update performance: add ONE new book via update_index(), which
+    # uses $addToSet per term instead of rebuilding the collection.
+    new_book_id = (book_ids[-1] + 1) if book_ids else 0
+    sample_body = (SYNTHETIC_DATALAKE / f"{book_ids[0]}.body.txt").read_text(encoding="utf-8")
+    t0 = time.perf_counter()
+    idx_mongo.update_index(new_book_id, sample_body, uri)
+    update_seconds = time.perf_counter() - t0
 
     # Package every measurement into one dict, ready to print and to
     # merge into the results file. No file/dir/size metrics here,
@@ -228,7 +292,9 @@ def benchmark_mongo(book_ids, uri):
         "structure": "mongodb",
         "n_terms": n_terms,
         "build_seconds": round(build_seconds, 4),
+        "peak_memory_kb": round(peak_bytes / 1024, 1),
         "avg_lookup_ms": round((lookup_seconds / len(QUERY_WORDS)) * 1000, 5),
+        "update_seconds": round(update_seconds, 5),
     }
 
 
@@ -288,6 +354,19 @@ def print_table(scale: int, results_by_structure: dict):
             size_kb = "n/a (db)"
             files = "n/a (db)"
         print(f"{r['structure']:<18}{r['build_seconds']:<12}{lookup_desc:<28}{str(files):<10}{str(size_kb):<12}")
+
+    # Separate block for the two newer metrics (update performance,
+    # memory usage) - they don't fit the table above without making it
+    # unreadable, and json_monolithic's update cost has 2 parts
+    # (in-memory + full-file rewrite) worth keeping distinguishable.
+    print(f"\n{'Structure':<18}{'Peak mem (KB)':<16}{'Update (s)':<28}")
+    print("-" * 62)
+    for r in results_by_structure.values():
+        if r["structure"] == "json_monolithic":
+            update_desc = f"mem={r['update_memory_seconds']}s / save={r['update_save_seconds']}s"
+        else:
+            update_desc = f"{r['update_seconds']}s"
+        print(f"{r['structure']:<18}{r['peak_memory_kb']:<16}{update_desc:<28}")
 
 
 def parse_scales(csv_str):
