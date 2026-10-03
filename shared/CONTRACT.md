@@ -131,3 +131,13 @@ For a result to be comparable, report at minimum:
 - **Metadata** (team extension - see Section 5): insertion speed,
   `find_by_id` and `find_by_author` query performance (using the 2
   fixed authors above), scalability (4 scales - see Section 5).
+
+## 7. Status
+
+- [x] Dataset and query workload drafted
+- [ ] Reviewed and approved by Amado (Java)
+- [x] Reviewed and approved by Pablo (C++)
+- [x] Python benchmarks updated to use this contract
+- [ ] Java benchmarks updated to use this contract
+- [x] C++ benchmarks updated to use this contract
+

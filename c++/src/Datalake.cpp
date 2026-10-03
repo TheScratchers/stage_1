@@ -2,6 +2,7 @@
 #include <fstream>
 #include <sstream>
 #include <iomanip>
+#include <unordered_set>
 
 namespace fs = std::filesystem;
 
@@ -60,13 +61,11 @@ bool Datalake::saveBook(
 }
 
 BookFiles Datalake::locateBook(const fs::path& baseDir, DatalakeLayout layout, int bookId) {
-    if (layout == DatalakeLayout::BookBased || layout == DatalakeLayout::BatchBased) {
-        fs::path dir = getDirectoryPath(baseDir, layout, bookId);
-        BookFiles f{dir / (std::to_string(bookId) + ".header.txt"),
-                    dir / (std::to_string(bookId) + ".body.txt"), false};
-        f.exists = fs::exists(f.headerPath) && fs::exists(f.bodyPath);
-        if (f.exists) return f;
-    }
+    fs::path dir = getDirectoryPath(baseDir, layout, bookId);
+    BookFiles f{dir / (std::to_string(bookId) + ".header.txt"),
+                dir / (std::to_string(bookId) + ".body.txt"), false};
+    f.exists = fs::exists(f.headerPath) && fs::exists(f.bodyPath);
+    if (f.exists) return f;
     return findBookRecursive(baseDir, bookId);
 }
 
@@ -91,4 +90,82 @@ BookFiles Datalake::findBookRecursive(const fs::path& baseDir, int bookId) {
     }
     files.exists = !files.headerPath.empty() && !files.bodyPath.empty();
     return files;
+}
+
+std::vector<int> Datalake::detectNewBooks(
+    const fs::path& baseDir,
+    DatalakeLayout layout,
+    const std::vector<int>& candidateIds
+) {
+    if (layout == DatalakeLayout::BookBased || layout == DatalakeLayout::BatchBased) {
+        std::vector<int> newIds;
+        for (int id : candidateIds) {
+            fs::path dir = getDirectoryPath(baseDir, layout, id);
+            if (!fs::exists(dir / (std::to_string(id) + ".body.txt"))) {
+                newIds.push_back(id);
+            }
+        }
+        return newIds;
+    }
+
+    std::unordered_set<int> existing;
+    std::error_code ec;
+    for (const auto& entry : fs::recursive_directory_iterator(baseDir, ec)) {
+        if (entry.is_regular_file()) {
+            std::string name = entry.path().filename().string();
+            auto dot = name.find(".body.txt");
+            if (dot != std::string::npos) {
+                try { existing.insert(std::stoi(name.substr(0, dot))); } catch (...) {}
+            }
+        }
+    }
+    std::vector<int> newIds;
+    for (int id : candidateIds) {
+        if (existing.find(id) == existing.end()) {
+            newIds.push_back(id);
+        }
+    }
+    return newIds;
+}
+
+int Datalake::recoverDatalake(
+    const fs::path& baseDir,
+    DatalakeLayout layout,
+    const std::vector<int>& expectedIds,
+    const std::map<int, std::pair<std::string, std::string>>& fallbackData
+) {
+    int restored = 0;
+    if (layout == DatalakeLayout::BookBased || layout == DatalakeLayout::BatchBased) {
+        for (int id : expectedIds) {
+            fs::path dir = getDirectoryPath(baseDir, layout, id);
+            if (!fs::exists(dir / (std::to_string(id) + ".body.txt")) || !fs::exists(dir / (std::to_string(id) + ".header.txt"))) {
+                auto it = fallbackData.find(id);
+                std::string h = (it != fallbackData.end()) ? it->second.first : ("Title: Book " + std::to_string(id) + "\nAuthor: Unknown\nLanguage: en\n");
+                std::string b = (it != fallbackData.end()) ? it->second.second : ("Body of book " + std::to_string(id));
+                if (saveBook(baseDir, layout, id, h, b)) restored++;
+            }
+        }
+        return restored;
+    }
+
+    std::unordered_set<int> existing;
+    std::error_code ec;
+    for (const auto& entry : fs::recursive_directory_iterator(baseDir, ec)) {
+        if (entry.is_regular_file()) {
+            std::string name = entry.path().filename().string();
+            auto dot = name.find(".body.txt");
+            if (dot != std::string::npos) {
+                try { existing.insert(std::stoi(name.substr(0, dot))); } catch (...) {}
+            }
+        }
+    }
+    for (int id : expectedIds) {
+        if (existing.find(id) == existing.end()) {
+            auto it = fallbackData.find(id);
+            std::string h = (it != fallbackData.end()) ? it->second.first : ("Title: Book " + std::to_string(id) + "\nAuthor: Unknown\nLanguage: en\n");
+            std::string b = (it != fallbackData.end()) ? it->second.second : ("Body of book " + std::to_string(id));
+            if (saveBook(baseDir, layout, id, h, b)) restored++;
+        }
+    }
+    return restored;
 }

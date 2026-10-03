@@ -6,19 +6,20 @@ This document details the pipeline architecture, codebase structure, and executi
 
 ## 1. Codebase Structure
 
-The C++ module is organized into focused, single-responsibility modules (each under 145 LOC):
+The C++ module is organized into focused, single-responsibility modules:
 
-*   **`CMakeLists.txt` / `Makefile`:** Build configuration enforcing C++17, `-O2` optimization, linking `libcurl` and `sqlite3`.
+*   **`CMakeLists.txt` / `Makefile`:** Build configuration enforcing C++17, `-O2` optimization, linking `libcurl` and `sqlite3`, building `search_engine` and `run_tests` executables.
 *   **`include/ControlLayer.hpp` / `src/ControlLayer.cpp`:** Orchestrator managing pipeline state (`downloaded_books.txt`, `indexed_books.txt`), automated path resolution, Gutenberg fetching via `libcurl`, and multi-datamart updates.
-*   **`include/Datalake.hpp` / `src/Datalake.cpp`:** Implements 3 partitioning strategies (Time-based, Book-based, and Batch-based) for raw book storage.
-*   **`include/MetadataExtractor.hpp` / `src/MetadataExtractor.cpp`:** Parses Gutenberg header fields (`Title`, `Author`, `Language`) with `std::regex` and stores them in SQLite (`metadata.db`) using prepared statements.
-*   **`include/Tokenizer.hpp` / `src/Tokenizer.cpp`:** Extracts cleaned, lowercase unique tokens using `std::set`.
-*   **`include/JsonIndex.hpp` / `src/JsonIndex.cpp`:** Monolithic JSON inverted index using modern `nlohmann::json`.
+*   **`include/Datalake.hpp` / `src/Datalake.cpp`:** Implements 3 partitioning strategies (Time-based, Book-based, and Batch-based), single-pass incremental detection (`detectNewBooks`), and idempotent recovery (`recoverDatalake`).
+*   **`include/MetadataExtractor.hpp` / `src/MetadataExtractor.cpp`:** Parses Gutenberg header fields (`Title`, `Author`, `Language`) with `std::regex` and stores them in SQLite (`metadata.db`) using prepared statements and transactions.
+*   **`include/Tokenizer.hpp` / `src/Tokenizer.cpp`:** Extracts cleaned, lowercase unique tokens using ASCII `[A-Za-z]+` per shared contract.
+*   **`include/JsonIndex.hpp` / `src/JsonIndex.cpp`:** Monolithic JSON inverted index using `nlohmann::json`.
 *   **`include/HierarchicalIndex.hpp` / `src/HierarchicalIndex.cpp`:** Partitioned directory-based inverted index (`A-Z/_`).
 *   **`include/BinaryIndex.hpp` / `src/BinaryIndex.cpp`:** High-performance custom binary index (`BIDX` magic, random file seek via `seekg`).
 *   **`include/QueryEngine.hpp` / `src/QueryEngine.cpp`:** Unified query engine for single-term and Boolean AND/OR queries.
-*   **`include/BenchmarkRunner.hpp` / `src/BenchmarkRunner.cpp`:** Automated benchmarking suite for Datalake hierarchies and Inverted Index architectures.
-*   **`src/main.cpp`:** Application entry point and CLI suite supporting pipeline execution, querying, and benchmarking.
+*   **`include/BenchmarkRunner.hpp` / `src/BenchmarkRunner.cpp`:** Multi-scale benchmarking suite for Datalake (write, lookup, incremental, recovery), Inverted Index (build, query, update, RAM, disk), and Metadata.
+*   **`src/main.cpp`:** Unified CLI application entry point.
+*   **`tests/`:** Automated test suite with 16 test suites covering all units.
 
 ---
 

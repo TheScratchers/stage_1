@@ -2,26 +2,28 @@
 
 > **Author:** Pablo Martínez Suárez (TheScratchers)  
 > **Course:** Big Data — Grado en Ciencia e Ingeniería de Datos, ULPGC  
-> **Standard:** C++17 (Clang / GCC / MSVC)
+> **Standard:** C++17 (Clang / GCC / MSVC)  
+> **Compliance:** Cross-Language Benchmark Contract (`shared/CONTRACT.md`) & Course Specification
 
 ---
 
 ## 1. Overview
 
-The C++ module implements the complete **Data Layer** for Stage 1 of the search engine project, comprising:
+The C++ module implements the complete **Data Layer** for Stage 1 of the search engine project:
 
 1. **Datalake Storage Engine**:
    - **Time-based hierarchy:** `data/datalake/YYYYMMDD/HH/<BOOK_ID>.{header,body}.txt`
    - **Book-based hierarchy:** `data/datalake/<BOOK_ID>/<BOOK_ID>.{header,body}.txt`
    - **Batch-based hierarchy:** `data/datalake/batch_<N>/<BOOK_ID>.{header,body}.txt`
-   - Full automated benchmark measuring write throughput, lookup latency, and filesystem overhead.
+   - Automated benchmark measuring write throughput, direct lookup latency, storage overhead (directories, max depth, avg files/dir), **incremental detection cost**, and **idempotent recovery behavior**.
 
 2. **Datamarts**:
-   - **Structured Metadata (SQLite):** Stores parsed Gutenberg metadata (`book_id`, `title`, `author`, `language`, `ingested_at`, `header_path`, `body_path`) in `data/datamarts/metadata.db` with indexed lookups by author, title, and book ID.
+   - **Structured Metadata (SQLite):** Stores parsed Gutenberg metadata (`book_id`, `title`, `author`, `language`, `ingested_at`, `header_path`, `body_path`) in `data/datamarts/metadata.db` with transactional batch ingestion (> 580,000 rows/s) and indexed lookups.
    - **Inverted Index (3 Distinct Architectures):**
      1. **Monolithic JSON:** `data/datamarts/inverted_index.json`
-     2. **Hierarchical Folders:** `data/datamarts/inverted_index_hier/<Letter>/<term>.txt`
+     2. **Hierarchical Sharded Folders:** `data/datamarts/inverted_index_hier/<Letter>/<term>.txt`
      3. **Custom Binary Compact Index:** `data/datamarts/inverted_index.bin` with `BIDX` binary header, term dictionary table, and direct seek-based postings retrieval.
+   - Measures build time, 10-word contract query latency across frequency tiers, update latency, disk footprint, and **RAM memory footprint via `getrusage()`**.
 
 3. **Control Layer**:
    - Orchestrates downloads from Project Gutenberg via `libcurl` and coordinates indexing into all datamarts without duplication.
@@ -31,6 +33,9 @@ The C++ module implements the complete **Data Layer** for Stage 1 of the search 
    - Single-term queries with millisecond latency comparison across all 3 index structures.
    - Boolean **AND** (postings intersection) and **OR** (postings union) search operations.
    - Metadata querying by author, title, or ID.
+
+5. **Automated Unit Testing Suite**:
+   - 16 test suites with 119 assertions covering Tokenizer, Metadata, Datalake layouts, Inverted Indexes, Query Engine, and Control Layer orchestration.
 
 ---
 
@@ -49,19 +54,27 @@ cmake -B build -S .
 cmake --build build
 ```
 
-### Building with Make
+### Running Automated Tests
 ```bash
-cd c++
-make
+# Option 1: Via CTest
+ctest --test-dir build --output-on-failure
+
+# Option 2: Via Direct Test Executable
+./build/run_tests
+
+# Option 3: Via Makefile
+make test
 ```
 
-The resulting binary will be placed at `c++/build/search_engine`.
+The build produces two binaries:
+- `c++/build/search_engine`: The unified CLI search engine and benchmark runner.
+- `c++/build/run_tests`: The standalone automated test suite executable.
 
 ---
 
 ## 3. Command-Line Interface (CLI)
 
-The compiled executable `search_engine` supports rich subcommands:
+The compiled executable `search_engine` provides rich commands:
 
 ### Run Pipeline Steps
 ```bash
@@ -90,7 +103,7 @@ The compiled executable `search_engine` supports rich subcommands:
 ./build/search_engine query-and truth fortune
 
 # Boolean OR query (terms union)
-./build/search_engine query-or alice elizabeth
+./build/search_engine query-or wonderland darcy
 ```
 
 ### Metadata Queries
@@ -108,17 +121,17 @@ The compiled executable `search_engine` supports rich subcommands:
 ./build/search_engine metadata --all
 ```
 
-### Benchmarks
+### Multi-Scale Benchmarks
 ```bash
-# Benchmark the 3 Datalake structures (saves to data/datamarts/benchmark_datalake_results.json)
-./build/search_engine bench-datalake 1000
+# Benchmark Datalake layouts across multi-scale sweeps (100, 1000, 10000)
+./build/search_engine bench-datalake 100,1000,10000
 
-# Benchmark SQLite Metadata storage: insert speed, query by ID & Dickens/Carroll (saves to benchmark_metadata_results.json)
-./build/search_engine bench-metadata 1000
+# Benchmark SQLite Metadata storage across scales
+./build/search_engine bench-metadata 100,1000,10000,100000
 
-# Benchmark the 3 Inverted Index structures using the 10 contract words (saves to benchmark_inverted_index_results.json)
-./build/search_engine bench-index 1000
+# Benchmark Inverted Index structures with 10 contract words and RAM profiling
+./build/search_engine bench-index 100,1000,10000
 
-# Run all 3 benchmarks sequentially
-./build/search_engine bench-all 1000
+# Run all benchmarks across scales
+./build/search_engine bench-all 100,1000,10000
 ```

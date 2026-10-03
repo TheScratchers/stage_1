@@ -5,6 +5,7 @@
 #include <iostream>
 #include <iomanip>
 #include <chrono>
+#include <sstream>
 
 namespace fs = std::filesystem;
 
@@ -98,17 +99,28 @@ int main(int argc, char* argv[]) {
 
     if (cmd == "bench-datalake" || cmd == "bench-index" || cmd == "bench-metadata" || cmd == "bench-all") {
         fs::path bDir = ctrl.getControlPath().parent_path() / "data" / "bench";
-        int nParam = (argc > 2) ? std::stoi(argv[2]) : 0;
-        int nL = (cmd == "bench-datalake" && nParam > 0) ? nParam : (nParam > 0 ? nParam : 200);
-        int nM = (cmd == "bench-metadata" && nParam > 0) ? nParam : (nParam > 0 ? nParam : 1000);
-        int nI = (cmd == "bench-index" && nParam > 0) ? nParam : (nParam > 0 ? nParam : 100);
+        auto parseScales = [](const std::string& str, const std::vector<int>& def) -> std::vector<int> {
+            if (str.empty()) return def;
+            std::vector<int> sc;
+            std::stringstream ss(str);
+            std::string item;
+            while (std::getline(ss, item, ',')) {
+                try { if (!item.empty()) sc.push_back(std::stoi(item)); } catch (...) {}
+            }
+            return sc.empty() ? def : sc;
+        };
+
+        std::string param = (argc > 2) ? argv[2] : "";
+        std::vector<int> lakeScales = parseScales(param, {100, 1000, 10000});
+        std::vector<int> idxScales = parseScales(param, {100, 1000, 10000});
+        std::vector<int> metaScales = parseScales(param, {100, 1000, 10000, 100000});
 
         if (cmd == "bench-datalake" || cmd == "bench-all")
-            BenchmarkRunner::runDatalakeBenchmark(bDir / "lake", lPath, nL, (mPath / "benchmark_datalake_results.json").string());
+            BenchmarkRunner::runDatalakeBenchmark(bDir / "lake", lPath, lakeScales, (mPath / "benchmark_datalake_results.json").string());
         if (cmd == "bench-metadata" || cmd == "bench-all")
-            BenchmarkRunner::runMetadataBenchmark(bDir / "bench_metadata.db", nM, (mPath / "benchmark_metadata_results.json").string());
+            BenchmarkRunner::runMetadataBenchmark(bDir / "bench_metadata.db", metaScales, (mPath / "benchmark_metadata_results.json").string());
         if (cmd == "bench-index" || cmd == "bench-all")
-            BenchmarkRunner::runIndexBenchmark(bDir / "idx", lPath, nI, (mPath / "benchmark_inverted_index_results.json").string());
+            BenchmarkRunner::runIndexBenchmark(bDir / "idx", lPath, idxScales, (mPath / "benchmark_inverted_index_results.json").string());
         return 0;
     }
 

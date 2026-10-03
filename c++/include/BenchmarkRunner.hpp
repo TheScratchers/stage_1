@@ -10,20 +10,20 @@ public:
     static void runDatalakeBenchmark(
         const std::filesystem::path& benchDir,
         const std::filesystem::path& datalakePath,
-        int nBooks,
+        const std::vector<int>& scales,
         const std::string& outJsonPath
     );
 
     static void runIndexBenchmark(
         const std::filesystem::path& benchDir,
         const std::filesystem::path& datalakePath,
-        int nBooks,
+        const std::vector<int>& scales,
         const std::string& outJsonPath
     );
 
     static void runMetadataBenchmark(
         const std::filesystem::path& benchDbPath,
-        int nBooks,
+        const std::vector<int>& scales,
         const std::string& outJsonPath
     );
 };

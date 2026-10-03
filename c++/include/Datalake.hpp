@@ -1,6 +1,8 @@
 #pragma once
 
 #include <string>
+#include <vector>
+#include <map>
 #include <filesystem>
 #include <chrono>
 
@@ -43,4 +45,17 @@ public:
     );
 
     static std::string layoutToString(DatalakeLayout layout);
+
+    static std::vector<int> detectNewBooks(
+        const std::filesystem::path& baseDir,
+        DatalakeLayout layout,
+        const std::vector<int>& candidateIds
+    );
+
+    static int recoverDatalake(
+        const std::filesystem::path& baseDir,
+        DatalakeLayout layout,
+        const std::vector<int>& expectedIds,
+        const std::map<int, std::pair<std::string, std::string>>& fallbackData
+    );
 };
