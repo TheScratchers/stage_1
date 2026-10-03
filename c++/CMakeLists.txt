@@ -11,6 +11,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/build)
 
 # ── Include paths ───────────────────────────────────────────
 include_directories(${CMAKE_SOURCE_DIR}/include)
+include_directories(${CMAKE_SOURCE_DIR}/tests)
 
 # ── Compiler flags ──────────────────────────────────────────
 if(MSVC)
@@ -24,13 +25,33 @@ find_package(CURL REQUIRED)
 find_package(SQLite3 REQUIRED)
 
 # ── Source files ────────────────────────────────────────────
-file(GLOB_RECURSE SOURCES "${CMAKE_SOURCE_DIR}/src/*.cpp")
+set(CORE_SOURCES
+    ${CMAKE_SOURCE_DIR}/src/Datalake.cpp
+    ${CMAKE_SOURCE_DIR}/src/MetadataExtractor.cpp
+    ${CMAKE_SOURCE_DIR}/src/JsonIndex.cpp
+    ${CMAKE_SOURCE_DIR}/src/HierarchicalIndex.cpp
+    ${CMAKE_SOURCE_DIR}/src/BinaryIndex.cpp
+    ${CMAKE_SOURCE_DIR}/src/QueryEngine.cpp
+    ${CMAKE_SOURCE_DIR}/src/ControlLayer.cpp
+    ${CMAKE_SOURCE_DIR}/src/Tokenizer.cpp
+    ${CMAKE_SOURCE_DIR}/src/BenchmarkRunner.cpp
+)
 
-add_executable(search_engine ${SOURCES})
+# ── Main Executable ─────────────────────────────────────────
+add_executable(search_engine ${CORE_SOURCES} ${CMAKE_SOURCE_DIR}/src/main.cpp)
 target_link_libraries(search_engine PRIVATE CURL::libcurl SQLite3::SQLite3)
+
+# ── Automated Unit Tests ────────────────────────────────────
+file(GLOB TEST_SOURCES "${CMAKE_SOURCE_DIR}/tests/*.cpp")
+add_executable(run_tests ${CORE_SOURCES} ${TEST_SOURCES})
+target_link_libraries(run_tests PRIVATE CURL::libcurl SQLite3::SQLite3)
+
+enable_testing()
+add_test(NAME unit_tests COMMAND run_tests)
 
 message(STATUS "=== Stage 1: C++ Search Engine (C++17) ===")
 message(STATUS "Sources   : ${CMAKE_SOURCE_DIR}/src")
+message(STATUS "Tests     : ${CMAKE_SOURCE_DIR}/tests")
 message(STATUS "Headers   : ${CMAKE_SOURCE_DIR}/include")
 message(STATUS "Build Dir : ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
 message(STATUS "CURL      : ${CURL_VERSION_STRING}")
