@@ -129,7 +129,7 @@ For a result to be comparable, report at minimum:
 
 - [x] Dataset and query workload drafted
 - [ ] Reviewed and approved by Amado (Java)
-- [ ] Reviewed and approved by Pablo (C++)
-- [ ] Python benchmarks updated to use this contract
+- [x] Reviewed and approved by Pablo (C++)
+- [x] Python benchmarks updated to use this contract
 - [ ] Java benchmarks updated to use this contract
-- [ ] C++ benchmarks updated to use this contract
+- [x] C++ benchmarks updated to use this contract
