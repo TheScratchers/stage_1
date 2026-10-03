@@ -9,102 +9,108 @@
       "json_monolithic": {
         "structure": "json_monolithic",
         "n_terms": 35008,
-        "build_seconds": 14.9619,
-        "peak_memory_kb": 69597.0,
-        "cold_load_seconds": 0.0993,
-        "in_memory_lookup_avg_ms": 0.00187,
-        "update_memory_seconds": 0.01132,
-        "update_save_seconds": 0.3745,
-        "update_total_seconds": 0.3858,
+        "build_seconds": 19.8658,
+        "peak_memory_kb": 69596.7,
+        "cold_load_seconds": 0.1371,
+        "in_memory_lookup_avg_ms": 0.00286,
+        "update_memory_seconds": 0.01345,
+        "update_save_seconds": 0.4766,
+        "update_total_seconds": 0.4901,
         "num_files": 1,
         "total_size_bytes": 6093632
       },
       "hierarchical": {
         "structure": "hierarchical",
         "n_terms": 35008,
-        "build_seconds": 38.0063,
-        "peak_memory_kb": 69592.5,
-        "avg_lookup_ms": 1.96049,
-        "update_seconds": 6.01019,
+        "build_seconds": 43.5249,
+        "peak_memory_kb": 69591.7,
+        "avg_lookup_ms": 1.88053,
+        "update_seconds": 6.85692,
         "num_files": 35008,
         "num_dirs": 26,
         "total_size_bytes": 5545744
       },
-      "mongodb": {
-        "structure": "mongodb",
+      "sqlite": {
+        "structure": "sqlite",
         "n_terms": 35008,
-        "build_seconds": 21.766,
-        "peak_memory_kb": 84302.2,
-        "avg_lookup_ms": 33.78005,
-        "update_seconds": 2.7791
+        "build_seconds": 17.429,
+        "peak_memory_kb": 99087.5,
+        "avg_lookup_ms": 1.01367,
+        "update_seconds": 0.22237,
+        "num_files": 1,
+        "total_size_bytes": 29384704
       }
     },
     "1000": {
       "json_monolithic": {
         "structure": "json_monolithic",
         "n_terms": 35008,
-        "build_seconds": 149.8107,
-        "peak_memory_kb": 422214.8,
-        "cold_load_seconds": 0.7203,
-        "in_memory_lookup_avg_ms": 0.00274,
-        "update_memory_seconds": 0.0305,
-        "update_save_seconds": 3.0782,
-        "update_total_seconds": 3.1087,
+        "build_seconds": 184.1945,
+        "peak_memory_kb": 423416.9,
+        "cold_load_seconds": 0.89,
+        "in_memory_lookup_avg_ms": 0.00171,
+        "update_memory_seconds": 0.04355,
+        "update_save_seconds": 3.9627,
+        "update_total_seconds": 4.0063,
         "num_files": 1,
         "total_size_bytes": 56450072
       },
       "hierarchical": {
         "structure": "hierarchical",
         "n_terms": 35008,
-        "build_seconds": 146.8167,
-        "peak_memory_kb": 384896.1,
-        "avg_lookup_ms": 5.69908,
-        "update_seconds": 14.45331,
+        "build_seconds": 173.3336,
+        "peak_memory_kb": 384897.1,
+        "avg_lookup_ms": 8.33773,
+        "update_seconds": 15.8903,
         "num_files": 35008,
         "num_dirs": 26,
         "total_size_bytes": 55902184
       },
-      "mongodb": {
-        "structure": "mongodb",
+      "sqlite": {
+        "structure": "sqlite",
         "n_terms": 35008,
-        "build_seconds": 137.1959,
-        "peak_memory_kb": 483424.0,
-        "avg_lookup_ms": 10.71475,
-        "update_seconds": 2.67732
+        "build_seconds": 166.8134,
+        "peak_memory_kb": 809511.5,
+        "avg_lookup_ms": 1.69533,
+        "update_seconds": 0.33211,
+        "num_files": 1,
+        "total_size_bytes": 311427072
       }
     },
     "10000": {
       "json_monolithic": {
         "structure": "json_monolithic",
         "n_terms": 35008,
-        "build_seconds": 1617.8572,
-        "peak_memory_kb": 4725787.9,
-        "cold_load_seconds": 11.0615,
-        "in_memory_lookup_avg_ms": 0.04663,
-        "update_memory_seconds": 0.332,
-        "update_save_seconds": 50.4966,
-        "update_total_seconds": 50.8286,
+        "build_seconds": 2021.9303,
+        "peak_memory_kb": 4737849.0,
+        "cold_load_seconds": 10.5556,
+        "in_memory_lookup_avg_ms": 0.00479,
+        "update_memory_seconds": 0.36074,
+        "update_save_seconds": 47.6145,
+        "update_total_seconds": 47.9752,
         "num_files": 1,
         "total_size_bytes": 560014472
       },
       "hierarchical": {
         "structure": "hierarchical",
         "n_terms": 35008,
-        "build_seconds": 1547.1209,
-        "peak_memory_kb": 4207565.9,
-        "avg_lookup_ms": 9.66832,
-        "update_seconds": 29.13053,
+        "build_seconds": 1487.343,
+        "peak_memory_kb": 4207567.6,
+        "avg_lookup_ms": 11.94336,
+        "update_seconds": 28.44332,
         "num_files": 35008,
         "num_dirs": 26,
         "total_size_bytes": 559466584
       },
-      "mongodb": {
-        "structure": "mongodb",
+      "sqlite": {
+        "structure": "sqlite",
         "n_terms": 35008,
-        "build_seconds": 1279.208,
-        "peak_memory_kb": 4797911.2,
-        "avg_lookup_ms": 46.74647,
-        "update_seconds": 4.44135
+        "build_seconds": 1582.1981,
+        "peak_memory_kb": 8586200.3,
+        "avg_lookup_ms": 34.53117,
+        "update_seconds": 1.77932,
+        "num_files": 1,
+        "total_size_bytes": 3099025408
       }
     }
   }
