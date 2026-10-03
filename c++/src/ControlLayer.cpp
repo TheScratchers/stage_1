@@ -36,6 +36,17 @@ void ControlLayer::resolvePaths(const std::string& cDir, const std::string& lDir
 
 ControlLayer::ControlLayer(const std::string& c, const std::string& l, const std::string& m) {
     resolvePaths(c, l, m);
+    // Ensure all existing indexed books are synchronized across all datamarts
+    if (fs::exists(indexedFile) && (!fs::exists(datamartPath / "inverted_index.db") || !fs::exists(datamartPath / "inverted_index.json"))) {
+        syncDatamarts();
+    }
+}
+
+void ControlLayer::syncDatamarts() {
+    auto idx = readIds(indexedFile);
+    for (int id : idx) {
+        indexBook(id);
+    }
 }
 
 std::unordered_set<int> ControlLayer::readIds(const fs::path& p) {
