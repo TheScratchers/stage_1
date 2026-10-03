@@ -22,7 +22,7 @@ The C++ module implements the complete **Data Layer** for Stage 1 of the search 
    - **Inverted Index (3 Distinct Architectures):**
      1. **Monolithic JSON:** `data/datamarts/inverted_index.json`
      2. **Hierarchical Sharded Folders:** `data/datamarts/inverted_index_hier/<Letter>/<term>.txt`
-     3. **Custom Binary Compact Index:** `data/datamarts/inverted_index.bin` with `BIDX` binary header, term dictionary table, and direct seek-based postings retrieval.
+     3. **SQLite Relational Index:** `data/datamarts/inverted_index.db` with table `(term, book_id)` for transactional relational inverted indexing.
    - Measures build time, 10-word contract query latency across frequency tiers, update latency, disk footprint, and **RAM memory footprint via `getrusage()`**.
 
 3. **Control Layer**:
@@ -96,8 +96,8 @@ The compiled executable `search_engine` provides rich commands:
 # Query a single term across all 3 index structures with latency comparison
 ./build/search_engine query truth all
 
-# Query using a specific structure: json, hier, or bin
-./build/search_engine query adventure bin
+# Query using a specific structure: json, hier, or sqlite
+./build/search_engine query adventure sqlite
 
 # Boolean AND query (terms intersection)
 ./build/search_engine query-and truth fortune
