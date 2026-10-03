@@ -6,9 +6,13 @@ This is a team extension beyond the project spec (see shared/CONTRACT.md
 Section 5): the spec does NOT require comparing metadata storage
 across languages, but since Python, Java and C++ are all benchmarking
 their own metadata storage choice this way, this script follows the
-same shared contract (20 real books, 3 synthetic scales, 2 fixed
-author queries) as the required datalake and inverted-index
-benchmarks, so the numbers stay comparable across languages.
+same shared contract (20 real books, 2 fixed author queries) as the
+required datalake and inverted-index benchmarks, so the numbers stay
+comparable across languages. Metadata adds one extra scale (100,000)
+on top of the contract's shared 100/1,000/10,000: unlike datalake and
+inverted-index, this benchmark only ever touches a single SQLite file
+(no per-book/per-term files), so it doesn't hit the OneDrive
+many-small-files slowdown that forced those two to stay smaller.
 
 Metrics measured at each scale:
   1. Insertion speed  -> time to upsert N books (seconds, books/sec)
@@ -21,9 +25,10 @@ Metrics measured at each scale:
                           "bigger result set costs more" effect is
                           visible instead of averaged away.
   3. Scalability       -> the trend across scales IS this metric: we
-                          run the same experiments at 100, 1,000 and
-                          10,000 books and compare how insertion and
-                          query times change as the table grows.
+                          run the same experiments at 100, 1,000,
+                          10,000 and 100,000 books and compare how
+                          insertion and query times change as the
+                          table grows.
 
 Uses the 20 real contract books already downloaded into
 datalake_shared/ (see download_shared_dataset.py), replicating their
@@ -38,8 +43,9 @@ idealized bulk-insert number.
 
 Usage:
     python benchmark_metadata.py [scales_csv]
-        Default scales_csv = "100,1000,10000" (the contract's 3
-        scales). Example: python benchmark_metadata.py 500,5000
+        Default scales_csv = "100,1000,10000,100000" (the contract's
+        3 shared scales plus this benchmark's own extra 100,000 tier).
+        Example: python benchmark_metadata.py 500,5000
 
 Results are printed to stdout and also written as JSON to
 datamarts/benchmark_metadata_results.json
@@ -112,9 +118,9 @@ def benchmark_scale(n_books: int, meta_by_real_id: dict):
             f"datalake/.../{book_id}.body.txt",
             f"datalake/.../{book_id}.header.txt",
         )
-        # Progress heartbeat for the larger scales, so a 10,000-row
+        # Progress heartbeat for the larger scales, so a 100,000-row
         # run doesn't look stuck for a while with no output.
-        if (i + 1) % 2000 == 0:
+        if (i + 1) % 10000 == 0:
             print(f"  ...inserted {i + 1}/{n_books}")
     insert_elapsed = time.perf_counter() - t0
 
@@ -158,7 +164,7 @@ def parse_scales(csv_str: str):
 
 
 def main():
-    scales_csv = sys.argv[1] if len(sys.argv) > 1 else "100,1000,10000"
+    scales_csv = sys.argv[1] if len(sys.argv) > 1 else "100,1000,10000,100000"
     scales = parse_scales(scales_csv)
     random.seed(42)
 

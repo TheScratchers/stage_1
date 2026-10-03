@@ -81,6 +81,8 @@ his side.)
 
 Every language should report its throughput/latency numbers at all 3
 scales, so the trend across scales is comparable language-to-language.
+Metadata is the one exception - it adds a 4th, larger scale on top of
+these 3 (see Section 5).
 
 ## 5. Metadata stress test (team extension, not required by the spec)
 
@@ -96,7 +98,8 @@ needs the same standardization as the required benchmarks above, or
 the numbers won't be comparable between languages.
 
 Using the same 20-book dataset and the same 3 synthetic scales
-defined above, every language's metadata benchmark must measure:
+defined above, plus one additional scale of 100,000 books, every
+language's metadata benchmark must measure:
 
 - **Insertion speed**: time to insert N synthetic rows.
 - **Query performance - `find_by_id`**: average time for a
@@ -112,8 +115,8 @@ defined above, every language's metadata benchmark must measure:
     matching set.
   - **Unique author**: `Lewis Carroll` (appears in only 1 of the 20
     books: 11) - exercises the query against a minimal matching set.
-- **Scalability**: the trend across the 3 scales for both queries
-  above, same as the other two benchmarks.
+- **Scalability**: the trend across these 4 scales (100 / 1,000 /
+  10,000 / 100,000) for both queries above.
 
 ## 6. What each language must report
 
@@ -127,13 +130,4 @@ For a result to be comparable, report at minimum:
   (per structure, per scale).
 - **Metadata** (team extension - see Section 5): insertion speed,
   `find_by_id` and `find_by_author` query performance (using the 2
-  fixed authors above), scalability (per scale).
-
-## 7. Status
-
-- [x] Dataset and query workload drafted
-- [ ] Reviewed and approved by Amado (Java)
-- [ ] Reviewed and approved by Pablo (C++)
-- [ ] Python benchmarks updated to use this contract
-- [ ] Java benchmarks updated to use this contract
-- [ ] C++ benchmarks updated to use this contract
+  fixed authors above), scalability (4 scales - see Section 5).
