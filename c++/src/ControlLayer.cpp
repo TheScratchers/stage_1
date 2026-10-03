@@ -105,7 +105,7 @@ bool ControlLayer::indexBook(int id) {
     MetadataExtractor::saveToDatabase(meta, (datamartPath / "metadata.db").string());
     JsonIndex::update(id, bText, (datamartPath / "inverted_index.json").string());
     HierarchicalIndex::update(id, bText, (datamartPath / "inverted_index_hier").string());
-    BinaryIndex::update(id, bText, (datamartPath / "inverted_index.bin").string());
+    SqliteIndex::update(id, bText, (datamartPath / "inverted_index.db").string());
 
     std::cout << "[INDEXER] Indexed book " << id << " (\"" << meta.title << "\" by " << meta.author << ")\n";
     return true;

@@ -10,7 +10,7 @@ TARGET = $(BUILD_DIR)/search_engine
 TEST_TARGET = $(BUILD_DIR)/run_tests
 
 CORE_SRCS = $(SRC_DIR)/Datalake.cpp $(SRC_DIR)/MetadataExtractor.cpp $(SRC_DIR)/JsonIndex.cpp \
-            $(SRC_DIR)/HierarchicalIndex.cpp $(SRC_DIR)/BinaryIndex.cpp $(SRC_DIR)/QueryEngine.cpp \
+            $(SRC_DIR)/HierarchicalIndex.cpp $(SRC_DIR)/SqliteIndex.cpp $(SRC_DIR)/QueryEngine.cpp \
             $(SRC_DIR)/ControlLayer.cpp $(SRC_DIR)/Tokenizer.cpp $(SRC_DIR)/BenchmarkRunner.cpp
 CORE_OBJS = $(patsubst $(SRC_DIR)/%.cpp, $(BUILD_DIR)/%.o, $(CORE_SRCS))
 

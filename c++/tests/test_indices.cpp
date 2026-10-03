@@ -1,7 +1,7 @@
 #include "test_framework.hpp"
 #include "JsonIndex.hpp"
 #include "HierarchicalIndex.hpp"
-#include "BinaryIndex.hpp"
+#include "SqliteIndex.hpp"
 #include <filesystem>
 #include <map>
 
@@ -55,32 +55,32 @@ TEST_CASE(Indices_HierarchicalIndex) {
     fs::remove_all(testDir, ec);
 }
 
-TEST_CASE(Indices_BinaryIndex) {
-    fs::path testFile = fs::temp_directory_path() / "test_idx.bin";
+TEST_CASE(Indices_SqliteIndex) {
+    fs::path testDb = fs::temp_directory_path() / "test_idx.db";
     std::error_code ec;
-    fs::remove(testFile, ec);
+    fs::remove(testDb, ec);
 
     std::map<std::string, std::vector<int>> map = {
         {"truth", {1342, 2701}},
-        {"fortune", {1342, 84}},
+        {"fortune", {84, 1342}},
         {"monster", {84, 1661, 2701}}
     };
 
-    CHECK(BinaryIndex::buildFromMap(map, testFile.string()));
+    CHECK(SqliteIndex::buildFromMap(map, testDb.string()));
 
-    auto rTruth = BinaryIndex::search("truth", testFile.string());
+    auto rTruth = SqliteIndex::search("truth", testDb.string());
     CHECK_EQ(rTruth.size(), 2);
     CHECK_EQ(rTruth[0], 1342);
 
-    auto rMonster = BinaryIndex::search("monster", testFile.string());
+    auto rMonster = SqliteIndex::search("monster", testDb.string());
     CHECK_EQ(rMonster.size(), 3);
 
-    // Update binary index
-    CHECK(BinaryIndex::update(999, "truth and honor", testFile.string()));
-    auto rTruthUpdated = BinaryIndex::search("truth", testFile.string());
+    // Update sqlite index
+    CHECK(SqliteIndex::update(999, "truth and honor", testDb.string()));
+    auto rTruthUpdated = SqliteIndex::search("truth", testDb.string());
     CHECK_EQ(rTruthUpdated.size(), 3);
 
-    fs::remove(testFile, ec);
+    fs::remove(testDb, ec);
 }
 
 TEST_CASE(Indices_ConsistencyAcrossStructures) {
@@ -91,7 +91,7 @@ TEST_CASE(Indices_ConsistencyAcrossStructures) {
 
     fs::path jPath = tempRoot / "idx.json";
     fs::path hPath = tempRoot / "hier";
-    fs::path bPath = tempRoot / "idx.bin";
+    fs::path sPath = tempRoot / "idx.db";
 
     std::map<std::string, std::vector<int>> corpus = {
         {"common", {1, 2, 3, 4, 5}},
@@ -103,14 +103,14 @@ TEST_CASE(Indices_ConsistencyAcrossStructures) {
     for (const auto& [t, ids] : corpus) {
         for (int id : ids) HierarchicalIndex::update(id, t, hPath.string());
     }
-    BinaryIndex::buildFromMap(corpus, bPath.string());
+    SqliteIndex::buildFromMap(corpus, sPath.string());
 
     for (const std::string& term : {"common", "rare", "shared", "absent"}) {
         auto jRes = JsonIndex::load(jPath.string())[term];
         auto hRes = HierarchicalIndex::search(term, hPath.string());
-        auto bRes = BinaryIndex::search(term, bPath.string());
+        auto sRes = SqliteIndex::search(term, sPath.string());
 
-        CHECK_EQ(hRes.size(), bRes.size());
+        CHECK_EQ(hRes.size(), sRes.size());
         if (term != "absent") {
             CHECK_EQ(jRes.size(), hRes.size());
         }

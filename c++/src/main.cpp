@@ -14,7 +14,7 @@ static void printUsage(const char* p) {
               << "Usage: " << p << " <command> [options]\n\n"
               << "Commands:\n"
               << "  step [N]                     Run N pipeline steps (default: 1)\n"
-              << "  query <term> [all|json|hier|bin]  Search term in inverted index\n"
+              << "  query <term> [all|json|hier|sqlite]  Search term in inverted index\n"
               << "  query-and <t1> <t2> ...      Boolean AND search\n"
               << "  query-or  <t1> <t2> ...      Boolean OR search\n"
               << "  metadata [--id N | --author X | --title Y | --all]\n"
@@ -54,9 +54,9 @@ int main(int argc, char* argv[]) {
             for (size_t i = 0; i < res.size(); ++i) std::cout << res[i] << (i + 1 < res.size() ? ", " : "");
             std::cout << "]\n";
         };
-        if (target == "json" || target == "all") search("JSON Monolithic", IndexType::Json, mPath / "inverted_index.json");
-        if (target == "hier" || target == "all") search("Hierarchical", IndexType::Hierarchical, mPath / "inverted_index_hier");
-        if (target == "bin"  || target == "all") search("Binary Compact", IndexType::Binary, mPath / "inverted_index.bin");
+        if (target == "json"   || target == "all") search("JSON Monolithic", IndexType::Json, mPath / "inverted_index.json");
+        if (target == "hier"   || target == "all") search("Hierarchical", IndexType::Hierarchical, mPath / "inverted_index_hier");
+        if (target == "sqlite" || target == "all") search("SQLite Index", IndexType::Sqlite, mPath / "inverted_index.db");
         std::cout << "\n";
         return 0;
     }
@@ -66,8 +66,8 @@ int main(int argc, char* argv[]) {
         std::vector<std::string> terms(argv + 2, argv + argc);
         auto t0 = std::chrono::high_resolution_clock::now();
         auto res = (cmd == "query-and")
-            ? QueryEngine::searchAnd(terms, IndexType::Binary, (mPath / "inverted_index.bin").string())
-            : QueryEngine::searchOr(terms, IndexType::Binary, (mPath / "inverted_index.bin").string());
+            ? QueryEngine::searchAnd(terms, IndexType::Sqlite, (mPath / "inverted_index.db").string())
+            : QueryEngine::searchOr(terms, IndexType::Sqlite, (mPath / "inverted_index.db").string());
         double ms = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count() * 1000.0;
 
         std::cout << cmd << " Results (" << std::fixed << std::setprecision(3) << ms << " ms): [";
@@ -135,9 +135,9 @@ int main(int argc, char* argv[]) {
 
         auto rJson = QueryEngine::searchSingle("sister", IndexType::Json, (mPath / "inverted_index.json").string());
         auto rHier = QueryEngine::searchSingle("sister", IndexType::Hierarchical, (mPath / "inverted_index_hier").string());
-        auto rBin  = QueryEngine::searchSingle("sister", IndexType::Binary, (mPath / "inverted_index.bin").string());
+        auto rSql  = QueryEngine::searchSingle("sister", IndexType::Sqlite, (mPath / "inverted_index.db").string());
         std::cout << "\n>>> Sample test complete! 'sister' matches -> JSON: " << rJson.size()
-                  << " | Hierarchical: " << rHier.size() << " | Binary: " << rBin.size() << "\n";
+                  << " | Hierarchical: " << rHier.size() << " | SQLite: " << rSql.size() << "\n";
         return 0;
     }
 
