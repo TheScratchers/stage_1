@@ -367,6 +367,17 @@ def merge_results(scale: int, new_results: dict):
 
     scale_key = str(scale)
     existing["results_by_scale"].setdefault(scale_key, {})
+    # Drop any structure this codebase no longer produces (e.g. a
+    # "mongodb" entry written by a run from before the team dropped
+    # MongoDB) - an old entry like that is missing keys the current
+    # print_table() always expects (total_size_bytes, num_files),
+    # since it belongs to a structure benchmark_*() no longer
+    # populates. Carrying it forward silently would either crash
+    # print_table() with a KeyError or display stale, no-longer-true
+    # numbers next to the 3 structures actually being compared now.
+    stale_structures = set(existing["results_by_scale"][scale_key]) - {"json_monolithic", "hierarchical", "sqlite"}
+    for stale in stale_structures:
+        del existing["results_by_scale"][scale_key][stale]
     # dict.update() overwrites structures that already exist at this
     # scale and adds new ones, same merge behaviour as before, just
     # now scoped to one scale instead of the whole file.
