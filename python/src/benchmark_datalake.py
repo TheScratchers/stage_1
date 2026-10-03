@@ -121,13 +121,23 @@ def benchmark_structure(name: str, path_fn, book_ids, content_by_real_id):
 
     # 1. Write throughput
     t0 = time.perf_counter()
-    for book_id in book_ids:
+    for i, book_id in enumerate(book_ids):
         # Cycle through the 20 contract books so every synthetic id
         # gets genuine header/body content instead of empty/dummy text.
         real_id = REAL_BOOK_IDS[book_id % len(REAL_BOOK_IDS)]
         header, body = content_by_real_id[real_id]
         out_dir = path_fn(str(base_dir), book_id)
         save_book(book_id, header, body, str(out_dir))
+        # Heartbeat for the larger scales - this structure is written
+        # 9 times per full run (3 structures x 3 scales), and without
+        # any output in between it's not obvious which one is running
+        # or whether it's still making progress. 2000 matches this
+        # loop's own pace (this benchmark writes roughly 200 books/sec,
+        # much faster per book than the inverted-index benchmarks, so
+        # a smaller interval like 200 would print almost every second -
+        # too chatty for how fast this particular loop runs).
+        if (i + 1) % 2000 == 0:
+            print(f"    [{name}] ...wrote {i + 1}/{len(book_ids)} books")
     write_elapsed = time.perf_counter() - t0
 
     # 2. Lookup cost: pick N_LOOKUPS random ids, resolve path + read body

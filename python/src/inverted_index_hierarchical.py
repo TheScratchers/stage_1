@@ -52,13 +52,24 @@ def build_index(datalake_dir: str, index_root: str = "datamarts/inverted_index")
     # First pass: build the whole index in memory (one set of book_ids
     # per term), the same way build_index() does in inverted_index.py.
     postings = defaultdict(set)
-    for body_file in sorted(Path(datalake_dir).rglob("*.body.txt")):
+    # sorted() already returns a list, so wrapping it in a variable
+    # here doesn't change what's iterated or in what order - it just
+    # lets us also report "X/N books processed" below. Purely
+    # additive: nothing about how `postings` is built changes.
+    body_files = sorted(Path(datalake_dir).rglob("*.body.txt"))
+    for i, body_file in enumerate(body_files):
         # The book_id is the part of the filename before the first
         # "." (e.g. "1342.body.txt" -> "1342" -> 1342).
         book_id = int(body_file.name.split(".")[0])
         text = body_file.read_text(encoding="utf-8")
         for term in set(tokenize(text)):
             postings[term].add(book_id)
+        # Heartbeat for large scales: this loop alone can run for
+        # minutes with no other output, which looks indistinguishable
+        # from a hang. Every 200 books is frequent enough to reassure
+        # without flooding the console.
+        if (i + 1) % 200 == 0:
+            print(f"    ...processed {i + 1}/{len(body_files)} books")
 
     # Second pass: unlike the monolithic JSON structure (one write for
     # the whole index), a full build here means one file write per

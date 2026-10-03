@@ -70,6 +70,7 @@ produces one combined report.
 import json
 import shutil
 import sys
+import tempfile
 import time
 import tracemalloc
 from pathlib import Path
@@ -87,13 +88,42 @@ QUERY_WORDS = load_words()
 # Scratch folder for everything this benchmark creates - kept separate
 # from the real datamarts/ output so we never mix synthetic and real
 # data while a run is in progress (it's deleted again at the end).
-BENCH_ROOT = Path("bench_data_idx")
+# Deliberately OUTSIDE the project folder (which lives inside OneDrive
+# on this machine) and not just gitignored: these are disposable
+# synthetic files recreated and deleted every run, never read by
+# anything else. Living inside a cloud-synced folder made cleanup
+# between scales intermittently fail with a Windows PermissionError
+# (the sync client can still hold a brief lock on a folder this script
+# just finished emptying) - the OS temp dir isn't watched by any sync
+# client, so that race can't happen here.
+BENCH_ROOT = Path(tempfile.gettempdir()) / "big_data_bench_inverted_index"
 SYNTHETIC_DATALAKE = BENCH_ROOT / "datalake"
 JSON_OUT = BENCH_ROOT / "inverted_index.json"
 HIER_ROOT = BENCH_ROOT / "inverted_index_hier"
 # The one file that DOES survive after cleanup - the actual results,
 # which is what gets committed to the repo as evidence.
 RESULTS_PATH = Path("datamarts/benchmark_inverted_index_results.json")
+
+
+def safe_rmtree(path: Path, retries: int = 10, delay: float = 0.5) -> None:
+    """
+    shutil.rmtree() that tolerates the transient "PermissionError:
+    [WinError 5] Acceso denegado" Windows raises when OneDrive (or
+    Search Indexer / antivirus) still has a handle open on a folder
+    this script just finished writing thousands of small files into -
+    it fails only on the final rmdir, after every file inside has
+    already been removed, and normally clears within a second or two.
+    Retries with a short, increasing wait instead of crashing the
+    whole benchmark run over a lock that isn't ours.
+    """
+    for attempt in range(retries):
+        try:
+            shutil.rmtree(path)
+            return
+        except PermissionError:
+            if attempt == retries - 1:
+                raise
+            time.sleep(delay * (attempt + 1))
 
 
 def load_real_bodies(real_book_ids):
@@ -117,7 +147,7 @@ def build_synthetic_datalake(n_books: int, real_book_ids, start_id: int = 200000
     # runs, so results aren't skewed by files left over from a
     # previous run.
     if SYNTHETIC_DATALAKE.exists():
-        shutil.rmtree(SYNTHETIC_DATALAKE)
+        safe_rmtree(SYNTHETIC_DATALAKE)
     SYNTHETIC_DATALAKE.mkdir(parents=True)
 
     bodies = load_real_bodies(real_book_ids)
@@ -204,6 +234,14 @@ def benchmark_json(book_ids):
 
 def benchmark_hierarchical(book_ids):
     print("  Building hierarchical (folder-per-letter/file-per-term) index...")
+    # Start from a clean, empty directory each time, same reasoning as
+    # SYNTHETIC_DATALAKE above: build_index() only ever adds/overwrites
+    # term files, it never starts from empty, so without this the
+    # folder accumulates stale term files across scales/runs forever -
+    # skewing storage-overhead numbers and piling up file churn for
+    # OneDrive to sync.
+    if HIER_ROOT.exists():
+        safe_rmtree(HIER_ROOT)
     # Build time: scan every synthetic body file and write one file
     # per unique term. tracemalloc wraps this to capture the peak
     # Python memory this structure needs to build.
@@ -362,11 +400,20 @@ def print_table(scale: int, results_by_structure: dict):
     print(f"\n{'Structure':<18}{'Peak mem (KB)':<16}{'Update (s)':<28}")
     print("-" * 62)
     for r in results_by_structure.values():
+        # .get(..., "n/a") rather than r[...]: a scale's merged entry
+        # can still hold an older result (e.g. a --mongo run from
+        # before these 2 metrics existed) that simply doesn't have
+        # these keys yet - showing "n/a" for that one row is correct,
+        # a KeyError crash is not. Delete/regenerate datamarts/
+        # benchmark_inverted_index_results.json for a fully fresh file.
         if r["structure"] == "json_monolithic":
-            update_desc = f"mem={r['update_memory_seconds']}s / save={r['update_save_seconds']}s"
+            if "update_memory_seconds" in r:
+                update_desc = f"mem={r['update_memory_seconds']}s / save={r['update_save_seconds']}s"
+            else:
+                update_desc = "n/a (stale result)"
         else:
-            update_desc = f"{r['update_seconds']}s"
-        print(f"{r['structure']:<18}{r['peak_memory_kb']:<16}{update_desc:<28}")
+            update_desc = f"{r['update_seconds']}s" if "update_seconds" in r else "n/a (stale result)"
+        print(f"{r['structure']:<18}{r.get('peak_memory_kb', 'n/a'):<16}{update_desc:<28}")
 
 
 def parse_scales(csv_str):
@@ -423,7 +470,12 @@ def main():
 
     # Remove the synthetic datalake/index files this run created -
     # only the merged results file (outside BENCH_ROOT) is kept.
-    shutil.rmtree(BENCH_ROOT, ignore_errors=True)
+    try:
+        safe_rmtree(BENCH_ROOT)
+    except Exception as e:
+        print(f"Warning: couldn't fully clean up {BENCH_ROOT} ({e}); "
+              f"delete it manually when convenient - it has no effect "
+              f"on the results already written to {RESULTS_PATH}.")
 
 
 if __name__ == "__main__":
