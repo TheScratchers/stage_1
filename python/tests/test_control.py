@@ -119,7 +119,7 @@ def test_control_pipeline_step_picks_smallest_pending_id_first(tmp_path, monkeyp
     assert index_calls == [3]
 
 
-def test_index_book_updates_metadata_and_both_indexes(tmp_path, monkeypatch):
+def test_index_book_updates_metadata_and_all_three_indexes(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
     book_dir = tmp_path / "datalake" / "5"
@@ -141,6 +141,14 @@ def test_index_book_updates_metadata_and_both_indexes(tmp_path, monkeypatch):
 
     import inverted_index_hierarchical as iih
     assert iih.search("rabbit", control.HIER_INDEX_ROOT) == [5]
+
+    # SQLite is wired into index_book() alongside JSON and
+    # hierarchical (unlike MongoDB before it, which was deliberately
+    # left out of the live pipeline) - a single index_book() call must
+    # update all three.
+    import inverted_index_sqlite as iis
+    assert iis.search("whale", control.SQLITE_INDEX_PATH) == [5]
+    assert iis.search("rabbit", control.SQLITE_INDEX_PATH) == [5]
 
 
 def test_index_book_returns_false_when_book_not_in_datalake(tmp_path, monkeypatch):

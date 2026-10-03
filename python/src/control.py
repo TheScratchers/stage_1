@@ -20,6 +20,7 @@ from datalake import ingest_book
 from metadata import init_db, upsert_book, parse_header
 from inverted_index import load_index, save_index, update_index as update_json_index
 from inverted_index_hierarchical import update_index as update_hier_index
+from inverted_index_sqlite import update_index as update_sqlite_index
 
 # Folder + file paths for the two plain-text state files this module
 # reads and writes.
@@ -35,6 +36,7 @@ TOTAL_BOOKS = 70000
 DB_PATH = "datamarts/books.db"
 JSON_INDEX_PATH = "datamarts/inverted_index.json"
 HIER_INDEX_ROOT = "datamarts/inverted_index"
+SQLITE_INDEX_PATH = "datamarts/inverted_index.db"
 DATALAKE_DIR = "datalake"
 
 
@@ -81,8 +83,8 @@ def _find_book_files(book_id: int, datalake_dir: str = DATALAKE_DIR):
 def index_book(book_id: int) -> bool:
     """
     Indexes a single already-downloaded book: parses its metadata into
-    SQLite and incrementally updates the JSON and hierarchical
-    inverted indexes (no full rebuild).
+    SQLite and incrementally updates all three inverted indexes - JSON,
+    hierarchical, and SQLite (no full rebuild for any of them).
     """
     body_file, header_file = _find_book_files(book_id)
     if body_file is None:
@@ -113,6 +115,14 @@ def index_book(book_id: int) -> bool:
     # Hierarchical index: only the files for this book's terms are
     # touched, everything else in the index is left alone.
     update_hier_index(book_id, body_text, HIER_INDEX_ROOT)
+
+    # SQLite index: one INSERT OR IGNORE per term in this book,
+    # batched into a single transaction - same incremental, no-full-
+    # rebuild treatment as the other two structures. Unlike MongoDB
+    # (deliberately left out of the live pipeline, since it needed a
+    # separate running service), SQLite needs nothing beyond the
+    # filesystem, so it's included here.
+    update_sqlite_index(book_id, body_text, SQLITE_INDEX_PATH)
 
     return True
 

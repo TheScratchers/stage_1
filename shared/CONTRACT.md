@@ -84,6 +84,53 @@ scales, so the trend across scales is comparable language-to-language.
 Metadata is the one exception - it adds a 4th, larger scale on top of
 these 3 (see Section 5).
 
+### 4.1 Synthetic replication algorithm (mandatory)
+
+The scale alone ("10,000 synthetic books") doesn't guarantee
+comparable results - if each language assigns real content to its
+synthetic ids differently, one language's "synthetic book #5,000"
+could end up replicating a different real book (or a narrower slice
+of the 20) than another's, silently skewing vocabulary size, average
+book length, build time, memory, etc. at the exact same nominal scale.
+
+To rule this out, every language's synthetic datalake/inverted-index
+generator must follow this exact rule:
+
+> The i-th synthetic book, where i is its 0-indexed **position** in
+> the list of books being generated for this scale (NOT its numeric
+> book_id/synthetic id, which each language is free to number however
+> it wants) replicates the full header+body content of the real book
+> at position `i mod 20` in `books.txt`'s listed order (0-indexed:
+> position 0 = book 11, position 1 = book 84, ..., position 19 = book
+> 55 - see the table in Section 1).
+
+Concretely, at scale 10,000: positions 0, 20, 40, ... all replicate
+book 11; positions 1, 21, 41, ... all replicate book 84; and so on.
+This guarantees that, at any given scale, every language's corpus is
+built from the exact same 20 real books, used the exact same number
+of times each - the only thing that can then differ between languages
+is the implementation itself, which is the whole point of the
+comparison.
+
+Verified (2026-10) directly against each language's current code:
+Python's `benchmark_datalake.py`/`benchmark_inverted_index.py`
+(position-indexed via `enumerate()`), C++'s `BenchmarkRunner.cpp`
+(`sample[i % sample.size()]`, with `sample` loaded in this exact
+`books.txt` order), and Java's `BenchmarkRunner.java`
+(`baseTokenSets.get(i % baseCount)`, same order) already all follow
+this rule - no logic change was needed on any of the three sides.
+
+**One real residual risk, not a logic bug**: this rule silently breaks
+if a language's benchmark can't find all 20 real books on disk when
+it starts (e.g. `download_shared_dataset.py` - or each language's
+equivalent - was never run, or was interrupted). All three current
+implementations skip a missing book quietly rather than erroring, which
+shrinks the cycle length (e.g. to 18 or 19) without warning and breaks
+the equivalence above. Before an official benchmark run, each person
+must confirm their own machine actually has all 20 real books
+downloaded (20 `.header.txt` + 20 `.body.txt` files, matching every
+id in `books.txt`) - not just that the script ran without crashing.
+
 ## 5. Metadata stress test (team extension, not required by the spec)
 
 Section 4.1 of the project spec does NOT require comparing metadata

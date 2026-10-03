@@ -10,16 +10,19 @@ benchmark scripts used to compare the different structures - following
 the shared cross-language contract in `../shared/CONTRACT.md` so the
 numbers are comparable against the Java and C++ implementations.
 
+The team's three inverted-index structures are: a single monolithic
+JSON file, a hierarchical folder-per-letter/file-per-term layout, and
+SQLite (a single `(term, book_id)` table, schema shared with the Java
+implementation). All three languages (Python, Java, C++) use the same
+3 structures, so the cross-language comparison is meaningful.
+
 ## Requirements
 
 - Python 3.9+
-- Dependencies: `pip install -r requirements.txt` (installs `requests`
-  and `pymongo`)
-- Docker (optional) — only needed to run the MongoDB inverted-index
-  structure:
-  ```
-  docker run -d --name stage1-mongo -p 27017:27017 mongo:7
-  ```
+- Dependencies: `pip install -r requirements.txt` (installs `requests`)
+
+No external database or container is needed - SQLite is part of
+Python's standard library.
 
 All commands below assume the current directory is `python/`.
 
@@ -37,6 +40,7 @@ python/
 │   ├── books.db                      ← SQLite metadata (git-ignored)
 │   ├── inverted_index.json           ← JSON inverted index (git-ignored)
 │   ├── inverted_index/               ← hierarchical inverted index (git-ignored)
+│   ├── inverted_index.db             ← SQLite inverted index (git-ignored)
 │   └── benchmark_*_results.json      ← benchmark results (tracked in git,
 │                                        one file per benchmark - these are
 │                                        the evidence referenced in the report)
@@ -101,7 +105,7 @@ stores them in SQLite.
 ```
 python src/inverted_index.py [datalake_dir] [out_path]                # single JSON file
 python src/inverted_index_hierarchical.py [datalake_dir] [index_root] # folder-per-letter/file-per-term
-python src/inverted_index_mongo.py [datalake_dir] [mongo_uri]         # MongoDB (needs the container running)
+python src/inverted_index_sqlite.py [datalake_dir] [db_path]          # SQLite (term, book_id) table
 ```
 Defaults match the metadata script above (`datalake_dir=datalake`).
 
@@ -112,7 +116,9 @@ python src/control.py [steps]
 ```
 Each step either indexes one pending book or downloads a new one
 (never both), tracking progress in `control/downloaded_books.txt` and
-`control/indexed_books.txt`. Defaults to 1 step.
+`control/indexed_books.txt`. Indexing a book updates all three
+inverted-index structures (JSON, hierarchical, SQLite) incrementally,
+plus the SQLite metadata table. Defaults to 1 step.
 
 ## 5. Shared benchmark contract — one-time setup
 
@@ -152,23 +158,16 @@ after a simulated mid-ingestion crash). Results:
 ```
 python src/benchmark_inverted_index.py [scales_csv] [book_ids_csv]
 ```
-Default scales: `100,1000,10000`. Compares the JSON and hierarchical
-inverted-index structures: build time, query performance (10 fixed
-contract words), storage overhead, scalability, update performance
-(adding one book without a full rebuild), and peak memory usage.
-`book_ids_csv` overrides the 20 contract books (e.g. a single id, for
-a quick local smoke test) - leave it out for an official run.
-
-```
-python src/benchmark_inverted_index.py --mongo [scales_csv] [mongo_uri] [book_ids_csv]
-```
-Adds the MongoDB structure to the same results file (merged in, not
-overwritten - running the two modes separately, or re-running just one
-scale, still produces one combined report). Requires a running
-MongoDB instance (see the Docker command above).
-
-Both inverted-index modes write/merge into
-`datamarts/benchmark_inverted_index_results.json`.
+Default scales: `100,1000,10000`. One run now benchmarks all 3
+inverted-index structures (JSON, hierarchical, SQLite) together - no
+separate pass or external database needed. Compares build time, query
+performance (10 fixed contract words), storage overhead, scalability,
+update performance (adding one book without a full rebuild), and peak
+memory usage. `book_ids_csv` overrides the 20 contract books (e.g. a
+single id, for a quick local smoke test) - leave it out for an
+official run. Results:
+`datamarts/benchmark_inverted_index_results.json` (merged by scale, so
+re-running just one scale doesn't lose the others).
 
 ```
 python src/benchmark_metadata.py [scales_csv]
@@ -194,16 +193,14 @@ deliverable.
 A pytest suite covers the core logic of every module (path/structure
 computations, header parsing, index build/search/update, and the
 control layer's decision logic) using temporary directories and
-mocks - no network access or MongoDB needed.
+mocks - no network access or external database needed, including for
+the SQLite structure (it's exercised directly via Python's standard
+library, same as the metadata datamart).
 
 ```
 pip install pytest
 python -m pytest tests/ -v
 ```
-
-The MongoDB structure (`inverted_index_mongo.py`) isn't covered here
-since it needs a live database; it's exercised manually via the
-`--mongo` benchmark instead.
 
 ## Quick end-to-end example
 
@@ -214,5 +211,6 @@ python src/datalake.py 1342 5 11
 python src/metadata.py
 python src/inverted_index.py
 python src/inverted_index_hierarchical.py
+python src/inverted_index_sqlite.py
 python src/control.py 3
 ```

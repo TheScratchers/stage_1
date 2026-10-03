@@ -17,7 +17,7 @@ at startup, then every lookup is a plain dict access), but the whole
 file has to be parsed before the very first query can be answered, and
 that parsing cost grows with the size of the index. See
 benchmark_inverted_index.py for a concrete comparison against the
-hierarchical and MongoDB structures.
+hierarchical and SQLite structures.
 """
 
 import json
