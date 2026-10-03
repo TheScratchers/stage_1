@@ -1,13 +1,21 @@
 """
 Stage 1 - Benchmark: comparing the 3 inverted index structures
 (monolithic JSON, hierarchical folder-per-letter/file-per-term, and
-MongoDB) implemented in Python.
+SQLite) implemented in Python.
 
 Uses the shared cross-language contract (../shared/CONTRACT.md,
 books.txt, words.txt): the same 20 real books, the same 10 fixed
 query words, and the same 3 synthetic scales that Java and C++ must
 also use, so results are comparable across languages (see
 shared_contract.py for how these are loaded).
+
+The team agreed all three languages (Python, Java, C++) would use the
+same 3rd inverted-index structure, so the comparison across languages
+is meaningful: monolithic JSON, hierarchical folder/file, and SQLite
+(mirroring Java's SqliteIndexStorage schema - see
+inverted_index_sqlite.py). MongoDB was dropped entirely (it was heavy
+and unreliable on one team member's machine, and needed a separate
+run against a live database anyway).
 
 Metrics measured for each structure (see the "why these metrics"
 notes below):
@@ -17,7 +25,9 @@ notes below):
                            fixed workload, not a random sample, so
                            every language measures the exact same
                            queries
-  3. Storage overhead   -> number of files/dirs, total size on disk
+  3. Storage overhead   -> number of files/dirs (or just total size
+                           for SQLite's single .db file), total size
+                           on disk
   4. Update performance -> cost of adding ONE new book to an
                            already-built index via update_index(),
                            without rebuilding it from scratch (for
@@ -41,30 +51,25 @@ Why lookup cost is measured differently per structure:
     opening one small file from disk. So we report only the average
     per-lookup disk-read cost, which stays roughly constant no matter
     how big the whole index gets.
-  - MongoDB: same idea as hierarchical (no full in-memory load), each
-    lookup is a query. Benchmarked separately by the user because this
-    environment cannot reach a local MongoDB instance.
+  - SQLite: same idea as hierarchical (no full in-memory load), each
+    lookup is a query executed by SQLite's own query engine against
+    the on-disk (term, book_id) table, using the index its composite
+    primary key creates automatically.
 
 Usage:
     python benchmark_inverted_index.py [scales_csv] [book_ids_csv]
-        Benchmarks the JSON and hierarchical structures (no network
-        or database required) at every scale in scales_csv (default
-        "100,1000,10000", the contract's 3 scales). book_ids_csv
-        overrides the 20 contract books (e.g. "5" alone, for a quick
-        local smoke test on slow/networked filesystems) - leave it
-        out for an official, contract-compliant run.
+        Benchmarks all 3 structures (JSON, hierarchical, SQLite - no
+        network or external database required) at every scale in
+        scales_csv (default "100,1000,10000", the contract's 3
+        scales). book_ids_csv overrides the 20 contract books (e.g.
+        "5" alone, for a quick local smoke test on slow/networked
+        filesystems) - leave it out for an official, contract-
+        compliant run.
 
-    python benchmark_inverted_index.py --mongo [scales_csv] [mongo_uri] [book_ids_csv]
-        Benchmarks the MongoDB structure only, at every scale.
-        Requires a running MongoDB instance (see
-        inverted_index_mongo.py for how to start one with Docker) and
-        the pymongo package.
-
-Both modes MERGE their results into
+Results are written/merged into
     datamarts/benchmark_inverted_index_results.json
-so running the JSON/hierarchical part and the MongoDB part separately
-(e.g. from different machines), or re-running just one scale, still
-produces one combined report.
+so re-running just one scale still produces one combined report
+without losing the other scales' results.
 """
 
 import json
@@ -77,6 +82,7 @@ from pathlib import Path
 
 import inverted_index as idx_json
 import inverted_index_hierarchical as idx_hier
+import inverted_index_sqlite as idx_sqlite
 
 from shared_contract import load_book_ids, load_words
 
@@ -100,6 +106,7 @@ BENCH_ROOT = Path(tempfile.gettempdir()) / "big_data_bench_inverted_index"
 SYNTHETIC_DATALAKE = BENCH_ROOT / "datalake"
 JSON_OUT = BENCH_ROOT / "inverted_index.json"
 HIER_ROOT = BENCH_ROOT / "inverted_index_hier"
+SQLITE_OUT = BENCH_ROOT / "inverted_index.db"
 # The one file that DOES survive after cleanup - the actual results,
 # which is what gets committed to the repo as evidence.
 RESULTS_PATH = Path("datamarts/benchmark_inverted_index_results.json")
@@ -289,50 +296,58 @@ def benchmark_hierarchical(book_ids):
     }
 
 
-def benchmark_mongo(book_ids, uri):
-    # Imported here (rather than at the top of the file) so that
-    # running the JSON/hierarchical benchmarks never requires pymongo
-    # or a live MongoDB instance to be available.
-    import inverted_index_mongo as idx_mongo
-
-    print(f"  Building MongoDB index at {uri} ...")
-    # Build time: scan every synthetic body file and insert one
-    # document per unique term into MongoDB. tracemalloc only sees
-    # this process's own Python-side memory (building the postings
-    # dict before sending it to MongoDB), not the separate MongoDB
-    # server's memory - but that's still a fair, consistent "memory
-    # this implementation needs" number across all 3 structures.
+def benchmark_sqlite(book_ids):
+    print("  Building SQLite index...")
+    # Start from a clean .db file each time, same reasoning as JSON_OUT
+    # and HIER_ROOT above: build_index() does its own "DELETE FROM
+    # inverted_index" internally, but removing the file too keeps
+    # storage-overhead numbers (total_size_bytes) from ever reflecting
+    # SQLite's internal page reuse/fragmentation left over from a
+    # previous run at a different scale.
+    if SQLITE_OUT.exists():
+        SQLITE_OUT.unlink()
+    # Build time: scan every synthetic body file and insert one row
+    # per (term, book_id) posting. tracemalloc wraps this to capture
+    # the peak Python memory this structure needs to build (the
+    # postings dict held in memory before being sent to SQLite) - the
+    # same basis of comparison used for the other two structures.
     tracemalloc.start()
     t0 = time.perf_counter()
-    n_terms = idx_mongo.build_index(str(SYNTHETIC_DATALAKE), uri)
+    n_terms = idx_sqlite.build_index(str(SYNTHETIC_DATALAKE), str(SQLITE_OUT))
     build_seconds = time.perf_counter() - t0
     _, peak_bytes = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
-    # Same 10 fixed contract words.
+    # Every lookup here is a SQL query against the on-disk (term,
+    # book_id) table - no equivalent "load once" step, same as
+    # hierarchical. Same 10 fixed words.
     t0 = time.perf_counter()
     for term in QUERY_WORDS:
-        idx_mongo.search(term, uri)
+        idx_sqlite.search(term, str(SQLITE_OUT))
     lookup_seconds = time.perf_counter() - t0
 
     # Update performance: add ONE new book via update_index(), which
-    # uses $addToSet per term instead of rebuilding the collection.
+    # batches one INSERT OR IGNORE per term into a single transaction -
+    # no full rebuild, unlike the monolithic JSON structure.
     new_book_id = (book_ids[-1] + 1) if book_ids else 0
     sample_body = (SYNTHETIC_DATALAKE / f"{book_ids[0]}.body.txt").read_text(encoding="utf-8")
     t0 = time.perf_counter()
-    idx_mongo.update_index(new_book_id, sample_body, uri)
+    idx_sqlite.update_index(new_book_id, sample_body, str(SQLITE_OUT))
     update_seconds = time.perf_counter() - t0
 
     # Package every measurement into one dict, ready to print and to
-    # merge into the results file. No file/dir/size metrics here,
-    # since MongoDB manages its own on-disk storage.
+    # merge into the results file. Storage overhead is just the single
+    # .db file's size - no per-term file count the way hierarchical
+    # has, so num_files is reported as 1 for a consistent column.
     return {
-        "structure": "mongodb",
+        "structure": "sqlite",
         "n_terms": n_terms,
         "build_seconds": round(build_seconds, 4),
         "peak_memory_kb": round(peak_bytes / 1024, 1),
         "avg_lookup_ms": round((lookup_seconds / len(QUERY_WORDS)) * 1000, 5),
         "update_seconds": round(update_seconds, 5),
+        "num_files": 1,
+        "total_size_bytes": SQLITE_OUT.stat().st_size,
     }
 
 
@@ -341,9 +356,8 @@ def merge_results(scale: int, new_results: dict):
     Loads whatever's already on disk and merges new_results into the
     entry for this one scale, leaving every other scale - and every
     other structure already recorded at this same scale - untouched.
-    This is what lets the JSON/hierarchical run and the separate
-    --mongo run (maybe on a different machine, maybe for a different
-    scale) combine into one report instead of overwriting each other.
+    This is what lets re-running just one scale update that scale's
+    numbers without losing the others already in the results file.
     """
     RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
     existing = {"scales": [], "results_by_scale": {}}
@@ -378,19 +392,10 @@ def print_table(scale: int, results_by_structure: dict):
         # per structure before printing the row.
         if r["structure"] == "json_monolithic":
             lookup_desc = f"load={r['cold_load_seconds']}s / mem={r['in_memory_lookup_avg_ms']}ms"
-            size_kb = round(r["total_size_bytes"] / 1024, 1)
-            files = r["num_files"]
-        elif r["structure"] == "hierarchical":
+        else:  # hierarchical, sqlite
             lookup_desc = f"{r['avg_lookup_ms']}ms/lookup"
-            size_kb = round(r["total_size_bytes"] / 1024, 1)
-            files = r["num_files"]
-        else:  # mongodb
-            lookup_desc = f"{r['avg_lookup_ms']}ms/lookup"
-            # MongoDB doesn't expose per-file/on-disk size the way a
-            # plain filesystem structure does, so these are marked
-            # explicitly as not applicable instead of showing 0.
-            size_kb = "n/a (db)"
-            files = "n/a (db)"
+        size_kb = round(r["total_size_bytes"] / 1024, 1)
+        files = r["num_files"]
         print(f"{r['structure']:<18}{r['build_seconds']:<12}{lookup_desc:<28}{str(files):<10}{str(size_kb):<12}")
 
     # Separate block for the two newer metrics (update performance,
@@ -401,10 +406,11 @@ def print_table(scale: int, results_by_structure: dict):
     print("-" * 62)
     for r in results_by_structure.values():
         # .get(..., "n/a") rather than r[...]: a scale's merged entry
-        # can still hold an older result (e.g. a --mongo run from
-        # before these 2 metrics existed) that simply doesn't have
-        # these keys yet - showing "n/a" for that one row is correct,
-        # a KeyError crash is not. Delete/regenerate datamarts/
+        # can still hold an older result (e.g. from before these 2
+        # metrics existed, or a stale "mongodb" entry from before the
+        # team dropped it) that simply doesn't have these keys yet -
+        # showing "n/a" for that one row is correct, a KeyError crash
+        # is not. Delete/regenerate datamarts/
         # benchmark_inverted_index_results.json for a fully fresh file.
         if r["structure"] == "json_monolithic":
             if "update_memory_seconds" in r:
@@ -432,39 +438,27 @@ def main():
 
     print(f"Query workload: {len(QUERY_WORDS)} fixed words from ../shared/words.txt {QUERY_WORDS}")
 
-    if args and args[0] == "--mongo":
-        # --mongo mode: `python benchmark_inverted_index.py --mongo
-        # [scales_csv] [mongo_uri] [book_ids_csv]` - only builds and
-        # benchmarks the MongoDB structure, at every scale.
-        scales_csv = args[1] if len(args) > 1 else "100,1000,10000"
-        uri = args[2] if len(args) > 2 else "mongodb://localhost:27017/"
-        real_book_ids = parse_book_ids(args[3]) if len(args) > 3 else ALL_REAL_BOOK_IDS
-        scales = parse_scales(scales_csv)
+    # Single mode now: `python benchmark_inverted_index.py [scales_csv]
+    # [book_ids_csv]` builds and benchmarks all 3 structures (JSON,
+    # hierarchical, SQLite) together, at every scale, in one run - no
+    # separate --mongo pass needed anymore, since SQLite needs no
+    # external service to be running.
+    scales_csv = args[0] if len(args) > 0 else "100,1000,10000"
+    real_book_ids = parse_book_ids(args[1]) if len(args) > 1 else ALL_REAL_BOOK_IDS
+    scales = parse_scales(scales_csv)
 
-        for scale in scales:
-            print(f"\n=== {scale} books (MongoDB) ===")
-            book_ids = build_synthetic_datalake(scale, real_book_ids)
-            result = benchmark_mongo(book_ids, uri)
-            combined = merge_results(scale, {"mongodb": result})
-            print_table(scale, combined)
-    else:
-        # Default mode: `python benchmark_inverted_index.py [scales_csv]
-        # [book_ids_csv]` - builds and benchmarks both the JSON and
-        # hierarchical structures together, at every scale.
-        scales_csv = args[0] if len(args) > 0 else "100,1000,10000"
-        real_book_ids = parse_book_ids(args[1]) if len(args) > 1 else ALL_REAL_BOOK_IDS
-        scales = parse_scales(scales_csv)
-
-        for scale in scales:
-            print(f"\n=== {scale} books (JSON + hierarchical) ===")
-            book_ids = build_synthetic_datalake(scale, real_book_ids)
-            json_result = benchmark_json(book_ids)
-            hier_result = benchmark_hierarchical(book_ids)
-            combined = merge_results(scale, {
-                "json_monolithic": json_result,
-                "hierarchical": hier_result,
-            })
-            print_table(scale, combined)
+    for scale in scales:
+        print(f"\n=== {scale} books (JSON + hierarchical + SQLite) ===")
+        book_ids = build_synthetic_datalake(scale, real_book_ids)
+        json_result = benchmark_json(book_ids)
+        hier_result = benchmark_hierarchical(book_ids)
+        sqlite_result = benchmark_sqlite(book_ids)
+        combined = merge_results(scale, {
+            "json_monolithic": json_result,
+            "hierarchical": hier_result,
+            "sqlite": sqlite_result,
+        })
+        print_table(scale, combined)
 
     print(f"\nResults written to {RESULTS_PATH}")
 
