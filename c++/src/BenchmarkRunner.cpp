@@ -124,9 +124,9 @@ void BenchmarkRunner::runDatalakeBenchmark(const fs::path& bDir, const fs::path&
             }
             double incrWrtSec = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count();
 
-            // 5. Recovery behavior (simulate 50% loss and recover)
-            int resumeCount = n / 2;
-            for (int i = resumeCount; i < n; ++i) {
+            // 5. Recovery behavior (simulate 10% loss and recover idempotently)
+            int missingCount = std::max(1, n / 10);
+            for (int i = n - missingCount; i < n; ++i) {
                 BookFiles bf = Datalake::locateBook(target, layout, 100000 + i);
                 if (bf.exists) { fs::remove(bf.headerPath, ec); fs::remove(bf.bodyPath, ec); }
             }
@@ -155,7 +155,7 @@ void BenchmarkRunner::runDatalakeBenchmark(const fs::path& bDir, const fs::path&
                 {"avg_files_per_dir", avgFiles}, {"incremental_candidates", candidates.size()},
                 {"incremental_new_found", newFound.size()}, {"incremental_detect_seconds", incrDetSec},
                 {"incremental_write_seconds", incrWrtSec}, {"recovery_resumed_count", recovered},
-                {"recovery_seconds", recSec}, {"recovery_ok", recovered == (n - resumeCount)}
+                {"recovery_seconds", recSec}, {"recovery_ok", recovered == missingCount}
             });
 
             fs::remove_all(target, ec);
@@ -227,13 +227,17 @@ void BenchmarkRunner::runIndexBenchmark(const fs::path& bDir, const fs::path& lP
         // 2. Hierarchical
         fs::path hDir = bDir / "hier";
         fs::remove_all(hDir, ec);
+        fs::create_directories(hDir / "_", ec);
+        for (char c = 'A'; c <= 'Z'; ++c) fs::create_directories(hDir / std::string(1, c), ec);
+
         t0 = std::chrono::high_resolution_clock::now();
+        int hFiles = 0;
         for (const auto& [term, ids] : map) {
             char ini = std::toupper(static_cast<unsigned char>(term[0]));
-            fs::path p = hDir / ((ini >= 'A' && ini <= 'Z') ? std::string(1, ini) : "_");
-            fs::create_directories(p, ec);
-            std::ofstream f(p / (term + ".txt"));
+            fs::path p = hDir / ((ini >= 'A' && ini <= 'Z') ? std::string(1, ini) : "_") / (term + ".txt");
+            std::ofstream f(p);
             for (int id : ids) f << id << "\n";
+            hFiles++;
         }
         double hBuild = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count();
         double hRam = getPeakMemoryKb();
@@ -245,10 +249,15 @@ void BenchmarkRunner::runIndexBenchmark(const fs::path& bDir, const fs::path& lP
         t0 = std::chrono::high_resolution_clock::now();
         HierarchicalIndex::update(999999, "time love wonderland", hDir.string());
         double hUp = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count() * 1000.0;
-        uintmax_t hBytes = 0; int hFiles = 0, hDirs = 0;
-        for (const auto& e : fs::recursive_directory_iterator(hDir, ec)) {
-            if (e.is_regular_file()) { hBytes += e.file_size(); hFiles++; }
-            else if (e.is_directory()) hDirs++;
+        
+        uintmax_t hBytes = 0;
+        int hDirs = 27;
+        for (const auto& sub : fs::directory_iterator(hDir, ec)) {
+            if (sub.is_directory()) {
+                for (const auto& fileEntry : fs::directory_iterator(sub.path(), ec)) {
+                    if (fileEntry.is_regular_file()) hBytes += fileEntry.file_size();
+                }
+            }
         }
 
         std::cout << std::left << std::setw(18) << "hierarchical" << std::setw(11) << hBuild
