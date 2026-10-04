@@ -17,21 +17,27 @@ The benchmarks were executed measuring the Average Time (`avgt`) in milliseconds
 | Architecture | Scale | Time (ms/op) | Memory Alloc. Rate (MB/sec) | GC Time (ms) |
 | :--- | :--- | :--- | :--- | :--- |
 | **Monolithic JSON** | 100 | ~3.79 ms | ~3.12 MB/s | 0 |
-| **Monolithic JSON** | 10,000 | ~386.88 ms | ~194.61 MB/s | 81 |
-| **Hierarchical JSON** | 100 | ~5.11 ms | ~11.56 MB/s | 6 |
-| **Hierarchical JSON** | 10,000 | ~375.01 ms | ~192.27 MB/s | 56 |
-| **SQLite (Batch)** | 100 | ~118.54 ms | ~25.34 MB/s | 0 |
-| **SQLite (Batch)** | 10,000 | ~12,328.36 ms | ~48.66 MB/s | 160 |
+| **Monolithic JSON** | 1,000 | ~35.59 ms | ~32.90 MB/s | 0 |
+| **Monolithic JSON** | 10,000 | ~386.89 ms | ~194.62 MB/s | 81 |
+| **Hierarchical JSON** | 100 | ~5.12 ms | ~11.57 MB/s | 6 |
+| **Hierarchical JSON** | 1,000 | ~41.66 ms | ~32.99 MB/s | 0 |
+| **Hierarchical JSON** | 10,000 | ~375.01 ms | ~192.28 MB/s | 56 |
+| **SQLite (Batch)** | 100 | ~118.55 ms | ~25.34 MB/s | 0 |
+| **SQLite (Batch)** | 1,000 | ~1,633.37 ms | ~35.43 MB/s | 20 |
+| **SQLite (Batch)** | 10,000 | ~12,328.36 ms | ~48.67 MB/s | 160 |
 
 ### 2.2. Term Querying (Read Performance)
 | Architecture | Scale | Query Time (ms/op) | Query Memory Alloc. Rate (MB/sec) |
 | :--- | :--- | :--- | :--- |
 | **Monolithic JSON** | 100 | ~0.043 ms | ~7.16 MB/s |
+| **Monolithic JSON** | 1,000 | ~0.048 ms | ~37.44 MB/s |
 | **Monolithic JSON** | 10,000 | ~0.041 ms | ~249.54 MB/s |
-| **Hierarchical JSON** | 100 | ~0.050 ms | ~8.98 MB/s |
+| **Hierarchical JSON** | 100 | ~0.050 ms | ~8.99 MB/s |
+| **Hierarchical JSON** | 1,000 | ~0.049 ms | ~40.42 MB/s |
 | **Hierarchical JSON** | 10,000 | ~0.042 ms | ~259.68 MB/s |
-| **SQLite (B-Tree)** | 100 | ~0.222 ms | ~12.23 MB/s |
-| **SQLite (B-Tree)** | 10,000 | ~2.673 ms | ~333.58 MB/s |
+| **SQLite (B-Tree)** | 100 | ~0.223 ms | ~12.23 MB/s |
+| **SQLite (B-Tree)** | 1,000 | ~0.496 ms | ~90.57 MB/s |
+| **SQLite (B-Tree)** | 10,000 | ~2.673 ms | ~333.59 MB/s |
 
 ## 3. Algorithmic Complexity & Architecture Analysis
 
