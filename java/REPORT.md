@@ -6,13 +6,13 @@
 The objective of this benchmark is to evaluate the performance and memory behavior of three distinct Java-based inverted index implementations: Relational (SQLite), Monolithic JSON, and Hierarchical JSON.
 
 The testing environment complies strictly with the shared contract requirements:
-*   **Data Ingestion:** Utilizing the 20 shared dataset books (extracted from `shared/books.txt`) looped via modulo (`i % 20`) to reach the requested benchmark scales. Books were fully tokenized into a map before indexing.
+*   **Data Ingestion:** Utilizing the 20 shared dataset books (extracted from `shared/books.txt`) looped via modulo (`i % 20`) to reach the requested benchmark scales. Books were fully tokenized into a map before indexing, using the contract tokenizer (lowercase, then maximal runs of `[A-Za-z]`, via `TextTokenizer`).
 *   **Querying:** Executing batch searches over the 10 contract-specified test words from `shared/words.txt` per benchmark operation.
 *   **Bulk Building:** All implementations perform massive data ingestion via a `build()` method from the pre-constructed in-memory map.
 *   **Isolation:** Indexing benchmarks clear the storage layer per iteration. Query benchmarks populate the storage exclusively at the Trial level to measure read-only throughput on fully materialized indexes.
 
 ## 2. Empirical Results (Time & GC Profiling)
-The benchmarks were executed measuring the Average Time (`avgt`) in milliseconds per operation (`ms/op`) across scales of 100, 1,000, and 10,000 synthetic books[cite: 11]. Memory profiling captures `gc.alloc.rate.norm`, representing the absolute number of bytes dynamically allocated on the heap per operation (this is **allocation throughput**, not peak memory footprint)[cite: 10, 11]. 
+The benchmarks were executed measuring the Average Time (`avgt`) in milliseconds per operation (`ms/op`) across scales of 100, 1,000, and 10,000 synthetic books. Memory profiling captures `gc.alloc.rate.norm`, representing the absolute number of bytes dynamically allocated on the heap per operation (this is **allocation throughput**, not peak memory footprint). 
 
 *Note: Query times and memory allocations reflect the cost of searching **all 10 contract words** in a single operation*.
 
@@ -45,13 +45,13 @@ The benchmarks were executed measuring the Average Time (`avgt`) in milliseconds
 ## 3. Algorithmic Complexity & Architecture Analysis
 
 ### 3.1. Write Performance
-All three architectures scale linearly ($O(N)$) during the build phase. However, SQLite carries a significant constant time penalty. At 10,000 books, SQLite takes approximately 121 seconds to build the index[cite: 11], compared to ~3.1 seconds for Monolithic JSON and ~2.6 seconds for Hierarchical JSON[cite: 11]. Even with JDBC batching (`executeBatch`), the relational engine must parse SQL, manage JDBC state, and structure the B-Tree on disk. JSON bypasses this entirely via direct byte stream serialization.
+All three architectures scale linearly ($O(N)$) during the build phase. However, SQLite carries a significant constant time penalty. At 10,000 books, SQLite takes approximately 121 seconds to build the index, compared to ~3.1 seconds for Monolithic JSON and ~2.6 seconds for Hierarchical JSON. Even with JDBC batching (`executeBatch`), the relational engine must parse SQL, manage JDBC state, and structure the B-Tree on disk. JSON bypasses this entirely via direct byte stream serialization.
 
 ### 3.2. Read Performance & Result Set Scaling
-For query workloads, the roles reverse drastically. SQLite exhibits massive superiority in read performance. Searching the 10 contract words against 10,000 books takes only ~13.73 ms in SQLite[cite: 11]. This time represents the $O(K)$ cost of JDBC mapping the specific matching rows (`ResultSet`) into a Java `List<Integer>`, proving the B-Tree index prevents full table scans.
+For query workloads, the roles reverse drastically. SQLite exhibits massive superiority in read performance. Searching the 10 contract words against 10,000 books takes only ~13.73 ms in SQLite. This time represents the $O(K)$ cost of JDBC mapping the specific matching rows (`ResultSet`) into a Java `List<Integer>`, proving the B-Tree index prevents full table scans.
 
-In contrast, JSON architectures collapse under query loads at scale. Reading the 10 words from the Monolithic JSON takes over 43 seconds (~43,198 ms) at 10,000 books[cite: 11], as the JVM is forced to deserialize the entire massive JSON file into a `HashMap` for every iteration. Hierarchical JSON improves this by isolating deserialization to specific prefix folders (~1,223 ms)[cite: 11], but still pales in comparison to relational indexing.
+In contrast, JSON architectures collapse under query loads at scale. Reading the 10 words from the Monolithic JSON takes over 43 seconds (~43,198 ms) at 10,000 books, as the JVM is forced to read and deserialize the entire JSON file into a `HashMap` on every single word lookup (10 full parses per operation). Hierarchical JSON improves this by isolating deserialization to specific prefix folders (~1,223 ms), but still pales in comparison to relational indexing.
 
 ### 3.3. Memory Allocation Behavior (`gc.alloc.rate.norm`)
-The allocation metric (`Bytes/op`) perfectly corroborates the performance times. To query 10 words at scale 10,000, Monolithic JSON allocates a catastrophic ~21.9 GB of short-lived objects per operation[cite: 11] (churn rate, not peak heap). Hierarchical JSON allocates ~989 MB[cite: 11]. 
-Conversely, SQLite allocates merely ~2.4 MB per operation[cite: 11], confirming that the relational engine yields specific data points via cursors rather than forcing the JVM to reconstruct the entire dataset in memory.
+The allocation metric (`Bytes/op`) perfectly corroborates the performance times. To query 10 words at scale 10,000, Monolithic JSON allocates a catastrophic ~21.9 GB of short-lived objects per operation (churn rate, not peak heap). Hierarchical JSON allocates ~989 MB. 
+Conversely, SQLite allocates merely ~2.4 MB per operation, confirming that the relational engine yields specific data points via cursors rather than forcing the JVM to reconstruct the entire dataset in memory.

@@ -1,5 +1,6 @@
 package com.thescratchers.searchengine.benchmark;
 
+import com.thescratchers.searchengine.datamarts.TextTokenizer;
 import com.thescratchers.searchengine.datamarts.index.*;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.Blackhole;
@@ -121,36 +122,49 @@ public class BenchmarkRunner {
 
     private static Map<String, List<Integer>> generateMemoryIndex(int scale) throws IOException {
         List<String> bookIdLines = loadLines(BOOKS_PATH);
+        if (bookIdLines.isEmpty()) {
+            throw new IllegalStateException("No book ids found in " + BOOKS_PATH.toAbsolutePath());
+        }
+
+        // Real books, in books.txt's listed order. Tokenized with the
+        // contract tokenizer (CONTRACT.md Section 2): lowercase, then
+        // maximal runs of [A-Za-z] - exactly what TextTokenizer does.
         List<Set<String>> realBooksTokens = new ArrayList<>();
+        List<Integer> missing = new ArrayList<>();
 
         for (String line : bookIdLines) {
             int bookId = Integer.parseInt(line);
             Path bodyFile = findFile(bookId);
-            if (bodyFile != null) {
-                String content = Files.readString(bodyFile);
-                String[] tokens = content.toLowerCase().split("\\W+");
-                Set<String> uniqueTokens = new HashSet<>();
-                for (String token : tokens) {
-                    if (!token.isEmpty()) {
-                        uniqueTokens.add(token);
-                    }
-                }
-                realBooksTokens.add(uniqueTokens);
+            if (bodyFile == null) {
+                missing.add(bookId);
+                continue;
             }
+            String content = Files.readString(bodyFile);
+            realBooksTokens.add(new HashSet<>(TextTokenizer.tokenize(content)));
         }
 
-        if (realBooksTokens.isEmpty()) {
-            Set<String> dummy = new HashSet<>(Arrays.asList("dummy", "data", "fallback"));
-            realBooksTokens.add(dummy);
+        // CONTRACT.md Section 4.1 (residual risk): a missing book would
+        // silently shrink the 20-book cycle and break comparability with
+        // Python and C++, so fail loudly instead of benchmarking a
+        // different corpus.
+        if (!missing.isEmpty()) {
+            throw new IllegalStateException("Missing real books in " + DATALAKE_ROOT.toAbsolutePath()
+                    + " for ids " + missing + " - download all " + bookIdLines.size()
+                    + " books from shared/books.txt before running the benchmark.");
         }
 
         int booksCount = realBooksTokens.size();
         Map<String, List<Integer>> memoryIndex = new HashMap<>();
 
-        for (int i = 1; i <= scale; i++) {
-            Set<String> tokens = realBooksTokens.get(i % booksCount);
+        // CONTRACT.md Section 4.1: the i-th synthetic book (0-indexed
+        // POSITION) replicates the real book at books.txt position
+        // i mod 20. The synthetic book id is position + 1 (ids 1..scale);
+        // the id plays no role in choosing the content.
+        for (int position = 0; position < scale; position++) {
+            int syntheticId = position + 1;
+            Set<String> tokens = realBooksTokens.get(position % booksCount);
             for (String token : tokens) {
-                memoryIndex.computeIfAbsent(token, k -> new ArrayList<>()).add(i);
+                memoryIndex.computeIfAbsent(token, k -> new ArrayList<>()).add(syntheticId);
             }
         }
 
