@@ -26,16 +26,24 @@ Makefile
 !c++/Makefile
 
 # ─── Java build artifacts ───────────────────────────────────
+# Java runtime data (datalake, datamarts, benchmark scratch dirs)
+java/data/
 java/target/
 java/.gradle/
 java/build/
 *.class
-*.jar
 *.war
 *.ear
+*.db
 .classpath
 .project
 .settings/
+.vscode/
+data/datalake/*
+data/datamarts/*.db
+data/datamarts/*.json
+control/*.txt
+dependency-reduced-pom.xml
 
 # ─── Python artifacts ───────────────────────────────────────
 python/__pycache__/
