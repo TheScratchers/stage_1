@@ -10,8 +10,13 @@ import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
@@ -19,6 +24,10 @@ import java.util.concurrent.TimeUnit;
 @Warmup(iterations = 1, time = 1)
 @Measurement(iterations = 1, time = 1)
 public class BenchmarkRunner {
+
+    private static final Path BOOKS_PATH = Paths.get("../shared/books.txt");
+    private static final Path WORDS_PATH = Paths.get("../shared/words.txt");
+    private static final Path DATALAKE_ROOT = Paths.get("data/datalake");
 
     @State(Scope.Thread)
     public static class IndexingState {
@@ -31,7 +40,7 @@ public class BenchmarkRunner {
         public JsonHierarchicalIndexStorage hierarchicalStorage;
 
         @Setup(Level.Iteration)
-        public void setUp() {
+        public void setUp() throws IOException {
             cleanDirectory(new File("data/datamarts"));
             new File("data/datamarts").mkdirs();
 
@@ -54,7 +63,7 @@ public class BenchmarkRunner {
         public List<String> queryWords;
 
         @Setup(Level.Trial)
-        public void setUp() {
+        public void setUp() throws IOException {
             cleanDirectory(new File("data/datamarts"));
             new File("data/datamarts").mkdirs();
 
@@ -68,10 +77,7 @@ public class BenchmarkRunner {
             monolithicStorage.build(memoryIndex);
             hierarchicalStorage.build(memoryIndex);
 
-            queryWords = Arrays.asList(
-                    "project", "gutenberg", "alice", "wonderland", "adventure",
-                    "science", "history", "computer", "system", "data"
-            );
+            queryWords = loadLines(WORDS_PATH);
         }
     }
 
@@ -89,39 +95,65 @@ public class BenchmarkRunner {
         }
     }
 
-    private static Map<String, List<Integer>> generateMemoryIndex(int scale) {
-        String[] books = new String[]{
-                "the project gutenberg ebook of alice in wonderland adventure",
-                "computer science history system data analysis machine learning",
-                "artificial intelligence robotics cybernetics automation network",
-                "software engineering design patterns architecture algorithms",
-                "operating systems memory management virtualization security",
-                "database relational nosql distributed cluster replication",
-                "web development frontend backend fullstack javascript html css",
-                "cloud computing serverless microservices container docker",
-                "machine learning deep neural networks tensorflow pytorch",
-                "natural language processing text mining sentiment analysis",
-                "computer vision image recognition object detection tracking",
-                "data science big analytics hadoop spark flink streaming",
-                "cryptography encryption decryption hashing digital signatures",
-                "blockchain cryptocurrency bitcoin ethereum smart contracts",
-                "internet of things iot sensors edge computing fog",
-                "cybersecurity ethical hacking penetration testing malware",
-                "bioinformatics genomics sequencing dna protein structure",
-                "quantum computing qubits superposition entanglement gates",
-                "human computer interaction ui ux usability accessibility",
-                "computer graphics rendering ray tracing virtual reality"
-        };
+    private static Path findFile(int bookId) {
+        if (!Files.exists(DATALAKE_ROOT)) return null;
+        try (Stream<Path> stream = Files.walk(DATALAKE_ROOT)) {
+            return stream
+                    .filter(Files::isRegularFile)
+                    .filter(p -> p.getFileName().toString().equals(bookId + ".body.txt"))
+                    .findFirst()
+                    .orElse(null);
+        } catch (IOException e) {
+            return null;
+        }
+    }
 
+    private static List<String> loadLines(Path path) throws IOException {
+        List<String> result = new ArrayList<>();
+        if (!Files.exists(path)) return result;
+        for (String line : Files.readAllLines(path)) {
+            String trimmed = line.trim();
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) continue;
+            result.add(trimmed);
+        }
+        return result;
+    }
+
+    private static Map<String, List<Integer>> generateMemoryIndex(int scale) throws IOException {
+        List<String> bookIdLines = loadLines(BOOKS_PATH);
+        List<Set<String>> realBooksTokens = new ArrayList<>();
+
+        for (String line : bookIdLines) {
+            int bookId = Integer.parseInt(line);
+            Path bodyFile = findFile(bookId);
+            if (bodyFile != null) {
+                String content = Files.readString(bodyFile);
+                String[] tokens = content.toLowerCase().split("\\W+");
+                Set<String> uniqueTokens = new HashSet<>();
+                for (String token : tokens) {
+                    if (!token.isEmpty()) {
+                        uniqueTokens.add(token);
+                    }
+                }
+                realBooksTokens.add(uniqueTokens);
+            }
+        }
+
+        if (realBooksTokens.isEmpty()) {
+            Set<String> dummy = new HashSet<>(Arrays.asList("dummy", "data", "fallback"));
+            realBooksTokens.add(dummy);
+        }
+
+        int booksCount = realBooksTokens.size();
         Map<String, List<Integer>> memoryIndex = new HashMap<>();
+
         for (int i = 1; i <= scale; i++) {
-            String content = books[i % 20];
-            String[] tokens = content.split("\\s+");
-            Set<String> uniqueTokens = new HashSet<>(Arrays.asList(tokens));
-            for (String token : uniqueTokens) {
+            Set<String> tokens = realBooksTokens.get(i % booksCount);
+            for (String token : tokens) {
                 memoryIndex.computeIfAbsent(token, k -> new ArrayList<>()).add(i);
             }
         }
+
         return memoryIndex;
     }
 
