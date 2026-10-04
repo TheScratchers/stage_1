@@ -42,13 +42,16 @@ import java.util.stream.Stream;
  * hour directory is fixed once per structure run so the benchmark cannot break
  * if the clock crosses an hour boundary mid-run.
  *
+ * The synthetic data is written to the system temp dir (outside the project/OneDrive
+ * tree, like the Python benchmark's scratch folder); override with -Dbench.dir=<folder>.
+ *
  * Run from the java/ directory:
  *   java -cp target/benchmarks.jar com.thescratchers.searchengine.benchmark.DatalakeBenchmark [scales_csv]
  * Default scales: 100,1000,10000. Output: datamarts/benchmark_datalake_results.json
  */
 public class DatalakeBenchmark {
 
-    static final Path BENCH_ROOT = Paths.get("data/bench_datalake");
+    static final Path BENCH_ROOT = scratchDir("bench_datalake");
     static final Path RESULTS_PATH = Paths.get("datamarts/benchmark_datalake_results.json");
     static final int START_ID = 100000;
     static final int N_LOOKUPS = 200;
@@ -64,6 +67,7 @@ public class DatalakeBenchmark {
         String scalesCsv = args.length > 0 ? args[0] : "100,1000,10000";
         List<Integer> scales = parseScales(scalesCsv);
 
+        System.out.println("Scratch directory for synthetic data: " + BENCH_ROOT.toAbsolutePath());
         System.out.println("Loading real content from " + ContractDataset.DATALAKE_ROOT + "...");
         List<Integer> realIds = ContractDataset.loadBookIds();
         Map<Integer, RealBook> realBooks = ContractDataset.loadRealBooks();
@@ -99,8 +103,9 @@ public class DatalakeBenchmark {
             Files.writeString(RESULTS_PATH, JsonOut.toJson(out));
             System.out.println("\nResults written to " + RESULTS_PATH);
         } finally {
-            // Synthetic data: no need to keep it around.
-            deleteRecursively(BENCH_ROOT);
+            // Synthetic data: no need to keep it around. Never throws, so a cleanup
+            // problem cannot hide the real error of the run.
+            cleanupQuietly(BENCH_ROOT);
         }
     }
 
@@ -283,11 +288,54 @@ public class DatalakeBenchmark {
         return stats;
     }
 
+    /**
+     * Scratch directory for the synthetic data of a benchmark. It lives OUTSIDE the project
+     * tree (system temp dir, or -Dbench.dir=...): inside OneDrive/Dropbox-synced folders,
+     * Windows sync clients and antivirus hold freshly created files and make deletes fail
+     * with AccessDeniedException, and they would also distort the I/O measurements.
+     */
+    static Path scratchDir(String name) {
+        String base = System.getProperty("bench.dir", System.getProperty("java.io.tmpdir"));
+        return Paths.get(base, "thescratchers_bench", name);
+    }
+
+    private static final int DELETE_ATTEMPTS = 10;
+    private static final long DELETE_RETRY_DELAY_MS = 500;
+
+    /** Deletes a directory tree, retrying a few times (Windows may briefly lock fresh files). */
     static void deleteRecursively(Path root) throws IOException {
+        for (int attempt = 1; ; attempt++) {
+            try {
+                deleteTree(root);
+                return;
+            } catch (IOException e) {
+                if (attempt >= DELETE_ATTEMPTS) throw e;
+                try {
+                    Thread.sleep(DELETE_RETRY_DELAY_MS);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
+            }
+        }
+    }
+
+    private static void deleteTree(Path root) throws IOException {
         if (!Files.exists(root)) return;
+        List<Path> paths;
         try (Stream<Path> stream = Files.walk(root)) {
-            List<Path> paths = stream.sorted(Comparator.reverseOrder()).collect(Collectors.toList());
-            for (Path p : paths) Files.delete(p);
+            paths = stream.sorted(Comparator.reverseOrder()).collect(Collectors.toList());
+        }
+        for (Path p : paths) Files.deleteIfExists(p);
+    }
+
+    /** Best-effort cleanup: prints a warning instead of failing. */
+    static void cleanupQuietly(Path root) {
+        try {
+            deleteRecursively(root);
+        } catch (IOException e) {
+            System.err.println("[WARN] Could not delete scratch directory " + root.toAbsolutePath()
+                    + " (" + e + "). It only holds synthetic data and can be deleted manually.");
         }
     }
 

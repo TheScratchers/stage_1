@@ -44,13 +44,16 @@ import java.util.stream.IntStream;
  * Note: the insert of 100,000 rows with one auto-committed transaction per row
  * is slow by design (Python needs ~9 minutes); expect a long run at that scale.
  *
+ * Synthetic databases are created in the system temp dir (outside the project/OneDrive tree);
+ * override with -Dbench.dir=<folder>.
+ *
  * Run from the java/ directory:
  *   java -cp target/benchmarks.jar com.thescratchers.searchengine.benchmark.MetadataBenchmark [scales_csv]
  * Default scales: 100,1000,10000,100000. Output: datamarts/benchmark_metadata_results.json
  */
 public class MetadataBenchmark {
 
-    static final Path BENCH_ROOT = Paths.get("data/bench_metadata");
+    static final Path BENCH_ROOT = DatalakeBenchmark.scratchDir("bench_metadata");
     static final Path RESULTS_PATH = Paths.get("datamarts/benchmark_metadata_results.json");
     static final int START_ID = 500000;
     static final int N_ID_LOOKUPS = 200;
@@ -72,6 +75,7 @@ public class MetadataBenchmark {
         String scalesCsv = args.length > 0 ? args[0] : "100,1000,10000,100000";
         List<Integer> scales = DatalakeBenchmark.parseScales(scalesCsv);
 
+        System.out.println("Scratch directory for the synthetic databases: " + BENCH_ROOT.toAbsolutePath());
         System.out.println("Loading real metadata from " + ContractDataset.DATALAKE_ROOT + "...");
         List<Integer> realIds = ContractDataset.loadBookIds();
         Map<Integer, ParsedHeader> metaByRealId = new LinkedHashMap<>();
@@ -103,8 +107,9 @@ public class MetadataBenchmark {
             Files.writeString(RESULTS_PATH, JsonOut.toJson(out));
             System.out.println("\nResults written to " + RESULTS_PATH);
         } finally {
-            // Synthetic databases: only the results JSON survives.
-            DatalakeBenchmark.deleteRecursively(BENCH_ROOT);
+            // Synthetic databases: only the results JSON survives. Never throws, so a
+            // cleanup problem cannot hide the real error of the run.
+            DatalakeBenchmark.cleanupQuietly(BENCH_ROOT);
         }
     }
 
