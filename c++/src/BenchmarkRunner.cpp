@@ -11,10 +11,11 @@
 #include <chrono>
 #include <iomanip>
 #include <sys/resource.h>
+#include <unistd.h>
+#include <sys/wait.h>
 #if defined(__APPLE__) && defined(__MACH__)
 #include <mach/mach.h>
 #elif defined(__linux__)
-#include <unistd.h>
 #include <cstdio>
 #endif
 namespace fs = std::filesystem;
@@ -207,15 +208,16 @@ void BenchmarkRunner::runDatalakeBenchmark(const fs::path& bDir, const fs::path&
     saveResultsJson(outJson, jOut);
 }
 
-static double getMapMemoryKb(const std::map<std::string, std::vector<int>>& m) {
-    size_t bytes = sizeof(m);
-    for (const auto& [k, v] : m) {
-        bytes += 32; // std::_Rb_tree_node overhead
-        bytes += k.capacity() + sizeof(std::string);
-        bytes += v.capacity() * sizeof(int) + sizeof(std::vector<int>);
-    }
-    return static_cast<double>(bytes) / 1024.0;
-}
+struct IndexBenchMetrics {
+    double buildSec = 0.0;
+    double lookupMs = 0.0;
+    double updateMs = 0.0;
+    double peakRamKb = 0.0;
+    uintmax_t totalSizeBytes = 0;
+    int numFiles = 1;
+    int numDirs = 0;
+    double coldLoadSec = 0.0;
+};
 
 void BenchmarkRunner::runIndexBenchmark(const fs::path& bDir, const fs::path& lPath, const std::vector<int>& scales, const std::string& outJson) {
     auto sample = loadSampleBooks(lPath);
@@ -242,104 +244,173 @@ void BenchmarkRunner::runIndexBenchmark(const fs::path& bDir, const fs::path& lP
         std::error_code ec;
         fs::create_directories(bDir, ec);
 
-        // 1. JSON Monolithic (loads entire index into memory to serve lookups)
-        fs::path jFile = bDir / "idx.json";
-        auto t0 = std::chrono::high_resolution_clock::now();
-        JsonIndex::save(map, jFile.string());
-        double jBuild = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count();
+        // 1. JSON Monolithic (isolated process: builds, loads into RAM, searches, updates)
+        IndexBenchMetrics jRes{};
+        {
+            int pfd[2];
+            if (pipe(pfd) == 0) {
+                pid_t pid = fork();
+                if (pid == 0) {
+                    close(pfd[0]);
+                    fs::path jFile = bDir / "idx.json";
+                    auto t0 = std::chrono::high_resolution_clock::now();
+                    JsonIndex::save(map, jFile.string());
+                    jRes.buildSec = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count();
 
-        t0 = std::chrono::high_resolution_clock::now();
-        auto jLoaded = JsonIndex::load(jFile.string());
-        double jLoadSec = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count();
-        double jRam = getMapMemoryKb(jLoaded);
+                    t0 = std::chrono::high_resolution_clock::now();
+                    auto jLoaded = JsonIndex::load(jFile.string());
+                    jRes.coldLoadSec = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count();
+                    jRes.peakRamKb = getProcessMemoryKb();
 
-        t0 = std::chrono::high_resolution_clock::now();
-        for (const auto& q : queries) jLoaded.find(q);
-        double jLookup = (std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count() / queries.size()) * 1000.0;
+                    t0 = std::chrono::high_resolution_clock::now();
+                    for (const auto& q : queries) jLoaded.find(q);
+                    jRes.lookupMs = (std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count() / queries.size()) * 1000.0;
 
-        t0 = std::chrono::high_resolution_clock::now();
-        JsonIndex::update(999999, "time love wonderland", jFile.string());
-        double jUp = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count() * 1000.0;
-        uintmax_t jBytes = fs::file_size(jFile);
+                    t0 = std::chrono::high_resolution_clock::now();
+                    JsonIndex::update(999999, "time love wonderland", jFile.string());
+                    jRes.updateMs = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count() * 1000.0;
+                    jRes.totalSizeBytes = fs::file_size(jFile);
+                    jRes.numFiles = 1;
+                    jRes.numDirs = 0;
 
-        std::cout << std::left << std::setw(18) << "json_monolithic" << std::setw(11) << std::fixed << std::setprecision(3) << jBuild
-                  << std::setw(16) << jLookup << std::setw(15) << jUp << std::setw(14) << jRam << std::setw(14) << (jBytes / 1024.0) << "\n";
-
-        scaleObj["json_monolithic"] = {
-            {"structure", "json_monolithic"}, {"n_terms", map.size()}, {"build_seconds", jBuild},
-            {"peak_memory_kb", jRam}, {"cold_load_seconds", jLoadSec}, {"in_memory_lookup_avg_ms", jLookup},
-            {"update_seconds", jUp / 1000.0}, {"total_size_bytes", jBytes}
-        };
-        jLoaded.clear();
-
-        // 2. Hierarchical (zero in-memory footprint, on-demand streaming disk lookup)
-        fs::path hDir = bDir / "hier";
-        fs::remove_all(hDir, ec);
-        fs::create_directories(hDir / "_", ec);
-        for (char c = 'A'; c <= 'Z'; ++c) fs::create_directories(hDir / std::string(1, c), ec);
-
-        t0 = std::chrono::high_resolution_clock::now();
-        int hFiles = 0;
-        for (const auto& [term, ids] : map) {
-            char ini = std::toupper(static_cast<unsigned char>(term[0]));
-            fs::path p = hDir / ((ini >= 'A' && ini <= 'Z') ? std::string(1, ini) : "_") / (term + ".txt");
-            std::ofstream f(p);
-            for (int id : ids) f << id << "\n";
-            hFiles++;
-        }
-        double hBuild = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count();
-        double hRam = getProcessMemoryKb();
-
-        t0 = std::chrono::high_resolution_clock::now();
-        for (const auto& q : queries) HierarchicalIndex::search(q, hDir.string());
-        double hLookup = (std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count() / queries.size()) * 1000.0;
-
-        t0 = std::chrono::high_resolution_clock::now();
-        HierarchicalIndex::update(999999, "time love wonderland", hDir.string());
-        double hUp = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count() * 1000.0;
-        
-        uintmax_t hBytes = 0;
-        int hDirs = 27;
-        for (const auto& sub : fs::directory_iterator(hDir, ec)) {
-            if (sub.is_directory()) {
-                for (const auto& fileEntry : fs::directory_iterator(sub.path(), ec)) {
-                    if (fileEntry.is_regular_file()) hBytes += fileEntry.file_size();
+                    fs::remove(jFile, ec);
+                    (void)write(pfd[1], &jRes, sizeof(jRes));
+                    close(pfd[1]);
+                    _exit(0);
+                } else if (pid > 0) {
+                    close(pfd[1]);
+                    (void)read(pfd[0], &jRes, sizeof(jRes));
+                    close(pfd[0]);
+                    int st = 0;
+                    waitpid(pid, &st, 0);
                 }
             }
         }
 
-        std::cout << std::left << std::setw(18) << "hierarchical" << std::setw(11) << hBuild
-                  << std::setw(16) << hLookup << std::setw(15) << hUp << std::setw(14) << hRam << std::setw(14) << (hBytes / 1024.0) << "\n";
+        std::cout << std::left << std::setw(18) << "json_monolithic" << std::setw(11) << std::fixed << std::setprecision(3) << jRes.buildSec
+                  << std::setw(16) << jRes.lookupMs << std::setw(15) << jRes.updateMs << std::setw(14) << jRes.peakRamKb << std::setw(14) << (jRes.totalSizeBytes / 1024.0) << "\n";
 
-        scaleObj["hierarchical"] = {
-            {"structure", "hierarchical"}, {"n_terms", map.size()}, {"build_seconds", hBuild},
-            {"peak_memory_kb", hRam}, {"avg_lookup_ms", hLookup}, {"update_seconds", hUp / 1000.0},
-            {"num_files", hFiles}, {"num_dirs", hDirs}, {"total_size_bytes", hBytes}
+        scaleObj["json_monolithic"] = {
+            {"structure", "json_monolithic"}, {"n_terms", map.size()}, {"build_seconds", jRes.buildSec},
+            {"peak_memory_kb", jRes.peakRamKb}, {"cold_load_seconds", jRes.coldLoadSec}, {"in_memory_lookup_avg_ms", jRes.lookupMs},
+            {"update_seconds", jRes.updateMs / 1000.0}, {"total_size_bytes", jRes.totalSizeBytes}
         };
 
-        // 3. SQLite Relational Index (uses SQLite internal page cache buffer)
-        fs::path sFile = bDir / "idx.db";
-        t0 = std::chrono::high_resolution_clock::now();
-        SqliteIndex::buildFromMap(map, sFile.string());
-        double sBuild = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count();
-        double sRam = getProcessMemoryKb();
+        // 2. Hierarchical (isolated process: sharded filesystem directory structure)
+        IndexBenchMetrics hRes{};
+        {
+            int pfd[2];
+            if (pipe(pfd) == 0) {
+                pid_t pid = fork();
+                if (pid == 0) {
+                    close(pfd[0]);
+                    fs::path hDir = bDir / "hier";
+                    fs::remove_all(hDir, ec);
+                    fs::create_directories(hDir / "_", ec);
+                    for (char c = 'A'; c <= 'Z'; ++c) fs::create_directories(hDir / std::string(1, c), ec);
 
-        t0 = std::chrono::high_resolution_clock::now();
-        for (const auto& q : queries) SqliteIndex::search(q, sFile.string());
-        double sLookup = (std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count() / queries.size()) * 1000.0;
+                    auto t0 = std::chrono::high_resolution_clock::now();
+                    int hFiles = 0;
+                    for (const auto& [term, ids] : map) {
+                        char ini = std::toupper(static_cast<unsigned char>(term[0]));
+                        fs::path p = hDir / ((ini >= 'A' && ini <= 'Z') ? std::string(1, ini) : "_") / (term + ".txt");
+                        std::ofstream f(p);
+                        for (int id : ids) f << id << "\n";
+                        hFiles++;
+                    }
+                    hRes.buildSec = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count();
+                    hRes.peakRamKb = getProcessMemoryKb();
 
-        t0 = std::chrono::high_resolution_clock::now();
-        SqliteIndex::update(999999, "time love wonderland", sFile.string());
-        double sUp = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count() * 1000.0;
-        uintmax_t sBytes = fs::exists(sFile) ? fs::file_size(sFile) : 0;
+                    t0 = std::chrono::high_resolution_clock::now();
+                    for (const auto& q : queries) HierarchicalIndex::search(q, hDir.string());
+                    hRes.lookupMs = (std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count() / queries.size()) * 1000.0;
 
-        std::cout << std::left << std::setw(18) << "sqlite_index" << std::setw(11) << sBuild
-                  << std::setw(16) << sLookup << std::setw(15) << sUp << std::setw(14) << sRam << std::setw(14) << (sBytes / 1024.0) << "\n";
+                    t0 = std::chrono::high_resolution_clock::now();
+                    HierarchicalIndex::update(999999, "time love wonderland", hDir.string());
+                    hRes.updateMs = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count() * 1000.0;
+
+                    uintmax_t hBytes = 0;
+                    for (const auto& sub : fs::directory_iterator(hDir, ec)) {
+                        if (sub.is_directory()) {
+                            for (const auto& fileEntry : fs::directory_iterator(sub.path(), ec)) {
+                                if (fileEntry.is_regular_file()) hBytes += fileEntry.file_size();
+                            }
+                        }
+                    }
+                    hRes.totalSizeBytes = hBytes;
+                    hRes.numFiles = hFiles;
+                    hRes.numDirs = 27;
+
+                    fs::remove_all(hDir, ec);
+                    (void)write(pfd[1], &hRes, sizeof(hRes));
+                    close(pfd[1]);
+                    _exit(0);
+                } else if (pid > 0) {
+                    close(pfd[1]);
+                    (void)read(pfd[0], &hRes, sizeof(hRes));
+                    close(pfd[0]);
+                    int st = 0;
+                    waitpid(pid, &st, 0);
+                }
+            }
+        }
+
+        std::cout << std::left << std::setw(18) << "hierarchical" << std::setw(11) << hRes.buildSec
+                  << std::setw(16) << hRes.lookupMs << std::setw(15) << hRes.updateMs << std::setw(14) << hRes.peakRamKb << std::setw(14) << (hRes.totalSizeBytes / 1024.0) << "\n";
+
+        scaleObj["hierarchical"] = {
+            {"structure", "hierarchical"}, {"n_terms", map.size()}, {"build_seconds", hRes.buildSec},
+            {"peak_memory_kb", hRes.peakRamKb}, {"avg_lookup_ms", hRes.lookupMs}, {"update_seconds", hRes.updateMs / 1000.0},
+            {"num_files", hRes.numFiles}, {"num_dirs", hRes.numDirs}, {"total_size_bytes", hRes.totalSizeBytes}
+        };
+
+        // 3. SQLite Relational Index (isolated process: internal page cache buffer)
+        IndexBenchMetrics sRes{};
+        {
+            int pfd[2];
+            if (pipe(pfd) == 0) {
+                pid_t pid = fork();
+                if (pid == 0) {
+                    close(pfd[0]);
+                    fs::path sFile = bDir / "idx.db";
+                    fs::remove(sFile, ec);
+                    auto t0 = std::chrono::high_resolution_clock::now();
+                    SqliteIndex::buildFromMap(map, sFile.string());
+                    sRes.buildSec = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count();
+                    sRes.peakRamKb = getProcessMemoryKb();
+
+                    t0 = std::chrono::high_resolution_clock::now();
+                    for (const auto& q : queries) SqliteIndex::search(q, sFile.string());
+                    sRes.lookupMs = (std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count() / queries.size()) * 1000.0;
+
+                    t0 = std::chrono::high_resolution_clock::now();
+                    SqliteIndex::update(999999, "time love wonderland", sFile.string());
+                    sRes.updateMs = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count() * 1000.0;
+                    sRes.totalSizeBytes = fs::exists(sFile) ? fs::file_size(sFile) : 0;
+                    sRes.numFiles = 1;
+                    sRes.numDirs = 0;
+
+                    fs::remove(sFile, ec);
+                    (void)write(pfd[1], &sRes, sizeof(sRes));
+                    close(pfd[1]);
+                    _exit(0);
+                } else if (pid > 0) {
+                    close(pfd[1]);
+                    (void)read(pfd[0], &sRes, sizeof(sRes));
+                    close(pfd[0]);
+                    int st = 0;
+                    waitpid(pid, &st, 0);
+                }
+            }
+        }
+
+        std::cout << std::left << std::setw(18) << "sqlite_index" << std::setw(11) << sRes.buildSec
+                  << std::setw(16) << sRes.lookupMs << std::setw(15) << sRes.updateMs << std::setw(14) << sRes.peakRamKb << std::setw(14) << (sRes.totalSizeBytes / 1024.0) << "\n";
 
         scaleObj["sqlite_index"] = {
-            {"structure", "sqlite_index"}, {"n_terms", map.size()}, {"build_seconds", sBuild},
-            {"peak_memory_kb", sRam}, {"avg_lookup_ms", sLookup}, {"update_seconds", sUp / 1000.0},
-            {"num_files", 1}, {"total_size_bytes", sBytes}
+            {"structure", "sqlite_index"}, {"n_terms", map.size()}, {"build_seconds", sRes.buildSec},
+            {"peak_memory_kb", sRes.peakRamKb}, {"avg_lookup_ms", sRes.lookupMs}, {"update_seconds", sRes.updateMs / 1000.0},
+            {"num_files", 1}, {"total_size_bytes", sRes.totalSizeBytes}
         };
 
         fs::remove_all(bDir, ec);

@@ -268,7 +268,8 @@ def build_pdf(filename="c++/stage_1_cpp_report.pdf"):
         "Following the shared contract, we indexed the corpus using the exact tokenization rule (lowercase ASCII [A-Za-z]+) and evaluated "
         "three architectures: 1. Monolithic JSON (single file containing all vocabulary postings loaded into RAM), 2. Hierarchical Sharded "
         "(directory-partitioned term files A-Z/_), and 3. Relational SQLite Index (CREATE TABLE inverted_index(term TEXT, book_id INTEGER, PRIMARY KEY (term, book_id))). "
-        "Peak RAM is measured empirically during execution via process resident memory profiling (getrusage / mach task_info).",
+        "Each architecture is evaluated under strict worker process isolation to eliminate cross-structure heap contamination, with peak RAM "
+        "measured empirically via identical resident set size profiling (mach task_info / getrusage).",
         body_style
     ))
 
@@ -309,9 +310,9 @@ def build_pdf(filename="c++/stage_1_cpp_report.pdf"):
 
     story.append(Paragraph(
         "<b>Inverted Index Architectural Trade-offs & Memory Mechanics:</b><br/>"
-        "• <b>Monolithic JSON:</b> Delivers instantaneous query lookup (&lt; 0.001 ms) once loaded into RAM, with in-memory map consumption scaling predictably (6.2 MB → 30.8 MB → 276.7 MB). However, it suffers fatal incremental update degradation (10.6 seconds per book at 10,000 scale) due to complete file rewriting.<br/>"
-        "• <b>Hierarchical Index:</b> Streaming file operations provide localized atomic updates (3.7 ms per book) without global file locks. Managing 35,007 open file descriptors and OS filesystem cache buffers increases process peak resident memory (75.8 MB → 360.5 MB → 1,478.6 MB) while maintaining a compact disk footprint (466.9 MB).<br/>"
-        "• <b>SQLite Relational Index:</b> Guarantees full ACID transactional integrity with stable resident memory footprint (58.2 MB → 30.4 MB → 195.9 MB). Incremental updates remain exceptionally fast and constant (2.4 ms) even at 10,000 books, trading off higher disk footprint (4,225 MB) for indexed relational access.",
+        "• <b>Monolithic JSON:</b> Delivers instantaneous query lookup (&lt; 0.007 ms) once loaded into RAM, with resident set size scaling directly with corpus postings (47.5 MB → 333.3 MB → 1,307.3 MB). However, it suffers fatal incremental update degradation (11.9 seconds per book at 10,000 scale) due to complete file rewriting.<br/>"
+        "• <b>Hierarchical Index:</b> Streaming file operations provide localized atomic updates (3.9 ms per book) without global file locks. OS filesystem inode caches and directory stream buffers result in clean, monotonic resident memory scaling (8.2 MB → 39.9 MB → 344.4 MB) while maintaining a compact disk footprint (466.9 MB).<br/>"
+        "• <b>SQLite Relational Index:</b> Guarantees full ACID transactional integrity with stable, monotonic resident memory footprint (10.1 MB → 42.8 MB → 347.4 MB) under process isolation. Incremental updates remain exceptionally fast and constant (2.0 ms) even at 10,000 books, trading off higher disk footprint (4,225 MB) for indexed relational access.",
         bullet_style
     ))
 
