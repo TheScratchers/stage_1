@@ -10,6 +10,13 @@
 #include <fstream>
 #include <chrono>
 #include <iomanip>
+#include <sys/resource.h>
+#if defined(__APPLE__) && defined(__MACH__)
+#include <mach/mach.h>
+#elif defined(__linux__)
+#include <unistd.h>
+#include <cstdio>
+#endif
 namespace fs = std::filesystem;
 using json = nlohmann::json;
 
@@ -38,6 +45,54 @@ static std::vector<std::pair<std::string, std::string>> loadSampleBooks(const fs
         }
     }
     return books;
+}
+
+static double getProcessMemoryKb() {
+#if defined(__APPLE__) && defined(__MACH__)
+    struct mach_task_basic_info info;
+    mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+    if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &count) == KERN_SUCCESS) {
+        return static_cast<double>(info.resident_size) / 1024.0;
+    }
+    struct rusage u;
+    if (getrusage(RUSAGE_SELF, &u) == 0) return static_cast<double>(u.ru_maxrss) / 1024.0;
+    return 0.0;
+#elif defined(__linux__)
+    long rss = 0L;
+    FILE* fp = fopen("/proc/self/statm", "r");
+    if (fp) {
+        if (fscanf(fp, "%*s%ld", &rss) == 1) rss *= sysconf(_SC_PAGESIZE);
+        fclose(fp);
+        return static_cast<double>(rss) / 1024.0;
+    }
+    struct rusage u;
+    if (getrusage(RUSAGE_SELF, &u) == 0) return static_cast<double>(u.ru_maxrss);
+    return 0.0;
+#else
+    struct rusage u;
+    if (getrusage(RUSAGE_SELF, &u) == 0) return static_cast<double>(u.ru_maxrss);
+    return 0.0;
+#endif
+}
+
+static void saveResultsJson(const std::string& outJson, const json& j) {
+    if (outJson.empty()) return;
+    fs::path p(outJson);
+    std::error_code ec;
+    fs::create_directories(p.parent_path(), ec);
+    std::ofstream(p) << j.dump(2) << "\n";
+    std::cout << "\nResults saved to: " << p.string() << "\n";
+
+    fs::path root = p;
+    while (root.has_parent_path() && !fs::exists(root / ".git") && !fs::exists(root / "stage_1_building_data_layer.pdf")) {
+        root = root.parent_path();
+    }
+    if (fs::exists(root / "c++")) {
+        fs::path mirrorPath = root / "c++" / "datamarts" / p.filename();
+        fs::create_directories(mirrorPath.parent_path(), ec);
+        std::ofstream(mirrorPath) << j.dump(2) << "\n";
+        std::cout << "Results mirrored to repository: " << mirrorPath.string() << "\n";
+    }
 }
 
 void BenchmarkRunner::runDatalakeBenchmark(const fs::path& bDir, const fs::path& lPath, const std::vector<int>& scales, const std::string& outJson) {
@@ -149,11 +204,7 @@ void BenchmarkRunner::runDatalakeBenchmark(const fs::path& bDir, const fs::path&
         jOut["results_by_scale"][std::to_string(n)] = scaleArr;
     }
 
-    if (!outJson.empty()) {
-        fs::create_directories(fs::path(outJson).parent_path());
-        std::ofstream(outJson) << jOut.dump(2) << "\n";
-        std::cout << "\nResults saved to: " << outJson << "\n";
-    }
+    saveResultsJson(outJson, jOut);
 }
 
 static double getMapMemoryKb(const std::map<std::string, std::vector<int>>& m) {
@@ -219,6 +270,7 @@ void BenchmarkRunner::runIndexBenchmark(const fs::path& bDir, const fs::path& lP
             {"peak_memory_kb", jRam}, {"cold_load_seconds", jLoadSec}, {"in_memory_lookup_avg_ms", jLookup},
             {"update_seconds", jUp / 1000.0}, {"total_size_bytes", jBytes}
         };
+        jLoaded.clear();
 
         // 2. Hierarchical (zero in-memory footprint, on-demand streaming disk lookup)
         fs::path hDir = bDir / "hier";
@@ -236,7 +288,7 @@ void BenchmarkRunner::runIndexBenchmark(const fs::path& bDir, const fs::path& lP
             hFiles++;
         }
         double hBuild = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count();
-        double hRam = 64.0; // 64 KB streaming I/O file buffer
+        double hRam = getProcessMemoryKb();
 
         t0 = std::chrono::high_resolution_clock::now();
         for (const auto& q : queries) HierarchicalIndex::search(q, hDir.string());
@@ -270,7 +322,7 @@ void BenchmarkRunner::runIndexBenchmark(const fs::path& bDir, const fs::path& lP
         t0 = std::chrono::high_resolution_clock::now();
         SqliteIndex::buildFromMap(map, sFile.string());
         double sBuild = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t0).count();
-        double sRam = 2048.0; // 2 MB SQLite default page cache buffer
+        double sRam = getProcessMemoryKb();
 
         t0 = std::chrono::high_resolution_clock::now();
         for (const auto& q : queries) SqliteIndex::search(q, sFile.string());
@@ -294,11 +346,7 @@ void BenchmarkRunner::runIndexBenchmark(const fs::path& bDir, const fs::path& lP
         jOut["results_by_scale"][std::to_string(n)] = scaleObj;
     }
 
-    if (!outJson.empty()) {
-        fs::create_directories(fs::path(outJson).parent_path());
-        std::ofstream(outJson) << jOut.dump(2) << "\n";
-        std::cout << "\nResults saved to: " << outJson << "\n";
-    }
+    saveResultsJson(outJson, jOut);
 }
 
 void BenchmarkRunner::runMetadataBenchmark(const fs::path& dbPath, const std::vector<int>& scales, const std::string& outJson) {
@@ -365,9 +413,5 @@ void BenchmarkRunner::runMetadataBenchmark(const fs::path& dbPath, const std::ve
         fs::remove(dbPath, ec);
     }
 
-    if (!outJson.empty()) {
-        fs::create_directories(fs::path(outJson).parent_path());
-        std::ofstream(outJson) << jOut.dump(2) << "\n";
-        std::cout << "\nResults saved to: " << outJson << "\n";
-    }
+    saveResultsJson(outJson, jOut);
 }

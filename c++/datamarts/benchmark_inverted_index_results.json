@@ -1,0 +1,108 @@
+{
+  "results_by_scale": {
+    "100": {
+      "hierarchical": {
+        "avg_lookup_ms": 0.103875,
+        "build_seconds": 2.75401225,
+        "n_terms": 35007,
+        "num_dirs": 27,
+        "num_files": 35007,
+        "peak_memory_kb": 75856.0,
+        "structure": "hierarchical",
+        "total_size_bytes": 4895751,
+        "update_seconds": 0.00034775
+      },
+      "json_monolithic": {
+        "build_seconds": 0.051775584,
+        "cold_load_seconds": 0.08879825,
+        "in_memory_lookup_avg_ms": 0.0002958,
+        "n_terms": 35007,
+        "peak_memory_kb": 6219.041015625,
+        "structure": "json_monolithic",
+        "total_size_bytes": 9080614,
+        "update_seconds": 0.136455583
+      },
+      "sqlite_index": {
+        "avg_lookup_ms": 0.1102125,
+        "build_seconds": 0.760130459,
+        "n_terms": 35007,
+        "num_files": 1,
+        "peak_memory_kb": 58224.0,
+        "structure": "sqlite_index",
+        "total_size_bytes": 42082304,
+        "update_seconds": 0.00072275
+      }
+    },
+    "1000": {
+      "hierarchical": {
+        "avg_lookup_ms": 0.22129580000000001,
+        "build_seconds": 2.8660625,
+        "n_terms": 35007,
+        "num_dirs": 27,
+        "num_files": 35007,
+        "peak_memory_kb": 360544.0,
+        "structure": "hierarchical",
+        "total_size_bytes": 48957321,
+        "update_seconds": 0.000579667
+      },
+      "json_monolithic": {
+        "build_seconds": 0.409234167,
+        "cold_load_seconds": 0.633591417,
+        "in_memory_lookup_avg_ms": 0.00030829999999999996,
+        "n_terms": 35007,
+        "peak_memory_kb": 30806.970703125,
+        "structure": "json_monolithic",
+        "total_size_bytes": 84614734,
+        "update_seconds": 0.970906709
+      },
+      "sqlite_index": {
+        "avg_lookup_ms": 1.7579333999999998,
+        "build_seconds": 8.292949875,
+        "n_terms": 35007,
+        "num_files": 1,
+        "peak_memory_kb": 30432.0,
+        "structure": "sqlite_index",
+        "total_size_bytes": 426545152,
+        "update_seconds": 0.001007291
+      }
+    },
+    "10000": {
+      "hierarchical": {
+        "avg_lookup_ms": 0.7371667000000001,
+        "build_seconds": 6.510120708,
+        "n_terms": 35007,
+        "num_dirs": 27,
+        "num_files": 35007,
+        "peak_memory_kb": 1514144.0,
+        "structure": "hierarchical",
+        "total_size_bytes": 489573021,
+        "update_seconds": 0.00370875
+      },
+      "json_monolithic": {
+        "build_seconds": 4.797980458,
+        "cold_load_seconds": 6.955635709,
+        "in_memory_lookup_avg_ms": 0.000675,
+        "n_terms": 35007,
+        "peak_memory_kb": 276686.267578125,
+        "structure": "json_monolithic",
+        "total_size_bytes": 839955934,
+        "update_seconds": 10.636998375
+      },
+      "sqlite_index": {
+        "avg_lookup_ms": 4.1844583,
+        "build_seconds": 80.078658083,
+        "n_terms": 35007,
+        "num_files": 1,
+        "peak_memory_kb": 200608.0,
+        "structure": "sqlite_index",
+        "total_size_bytes": 4430639104,
+        "update_seconds": 0.002415417
+      }
+    }
+  },
+  "scales": [
+    100,
+    1000,
+    10000
+  ]
+}
