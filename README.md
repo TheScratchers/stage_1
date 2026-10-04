@@ -152,8 +152,11 @@ cmake --build build
 
 ```bash
 cd java
-# Instructions will be added during ft/java-setup
+mvn clean package
+java -jar target/benchmarks.jar
 ```
+
+**Requirements:** Java 17 and Maven 3.x.
 
 ### Python
 
