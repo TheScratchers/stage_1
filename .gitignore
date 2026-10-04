@@ -26,6 +26,8 @@ Makefile
 !c++/Makefile
 
 # ─── Java build artifacts ───────────────────────────────────
+# Java runtime data (datalake, datamarts, benchmark scratch dirs)
+java/data/
 java/target/
 java/.gradle/
 java/build/
