@@ -1,132 +1,81 @@
 package com.thescratchers.searchengine.datamarts.index;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
+import java.sql.*;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 
 public class SqliteIndexStorage implements InvertedIndexStorage {
-
-    private static final String DB_PATH = "data/datamarts/inverted_index.db";
-    private static final String DB_URL = "jdbc:sqlite:" + DB_PATH;
-    private static final int BATCH_SIZE = 10000;
-
-    private static final String DDL =
-            "CREATE TABLE IF NOT EXISTS inverted_index ("
-            + "term TEXT NOT NULL, "
-            + "book_id INTEGER NOT NULL, "
-            + "PRIMARY KEY (term, book_id)"
-            + ");";
-
-    private static final String INSERT =
-            "INSERT OR IGNORE INTO inverted_index (term, book_id) VALUES (?, ?)";
-
-    private static final String SELECT =
-            "SELECT book_id FROM inverted_index WHERE term = ? ORDER BY book_id";
-
-    private Connection writeConnection;
-    private PreparedStatement writeStatement;
-    private int batchCount = 0;
+    private final String dbUrl = "jdbc:sqlite:data/datamarts/inverted_index.db";
+    private Connection connection;
 
     public SqliteIndexStorage() {
-        initSchema(DB_URL);
-        initPersistentConnection();
-    }
-
-    public SqliteIndexStorage(String dbUrl) {
-        initSchema(dbUrl);
-        initPersistentConnection();
-    }
-
-    private void initPersistentConnection() {
         try {
-            writeConnection = DriverManager.getConnection(DB_URL);
-            try (Statement stmt = writeConnection.createStatement()) {
+            connection = DriverManager.getConnection(dbUrl);
+            try (Statement stmt = connection.createStatement()) {
                 stmt.execute("PRAGMA synchronous = OFF");
                 stmt.execute("PRAGMA journal_mode = MEMORY");
-                stmt.execute("PRAGMA temp_store = MEMORY");
+                stmt.execute("CREATE TABLE IF NOT EXISTS inverted_index (term TEXT, book_id INTEGER, PRIMARY KEY(term, book_id))");
             }
-            writeConnection.setAutoCommit(false);
-            writeStatement = writeConnection.prepareStatement(INSERT);
         } catch (SQLException e) {
-            System.err.println(e.getMessage());
+            throw new RuntimeException("Error initializing SQLite connection", e);
         }
     }
 
     @Override
-    public void save(int bookId, List<String> terms) {
-        if (terms == null || terms.isEmpty()) {
-            return;
-        }
-
-        Set<String> uniqueTerms = new HashSet<>(terms);
-        try {
-            for (String term : uniqueTerms) {
-                writeStatement.setString(1, term);
-                writeStatement.setInt(2, bookId);
-                writeStatement.addBatch();
-                batchCount++;
-
-                if (batchCount >= BATCH_SIZE) {
-                    writeStatement.executeBatch();
-                    writeConnection.commit();
-                    writeStatement.clearBatch();
-                    batchCount = 0;
-                }
-            }
-            writeStatement.executeBatch();
-            writeConnection.commit();
-            writeStatement.clearBatch();
-            batchCount = 0;
+    public void save(String term, int bookId) {
+        String sql = "INSERT OR IGNORE INTO inverted_index (term, book_id) VALUES (?, ?)";
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setString(1, term);
+            pstmt.setInt(2, bookId);
+            pstmt.executeUpdate();
         } catch (SQLException e) {
-            try {
-                writeConnection.rollback();
-            } catch (SQLException rollbackEx) {
-                System.err.println(rollbackEx.getMessage());
+            throw new RuntimeException("Error saving term incrementally", e);
+        }
+    }
+
+    @Override
+    public void build(Map<String, List<Integer>> memoryIndex) {
+        String sql = "INSERT OR IGNORE INTO inverted_index (term, book_id) VALUES (?, ?)";
+        try {
+            connection.setAutoCommit(false);
+            try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+                int count = 0;
+                for (Map.Entry<String, List<Integer>> entry : memoryIndex.entrySet()) {
+                    String term = entry.getKey();
+                    for (int bookId : entry.getValue()) {
+                        pstmt.setString(1, term);
+                        pstmt.setInt(2, bookId);
+                        pstmt.addBatch();
+                        
+                        if (++count % 10000 == 0) {
+                            pstmt.executeBatch();
+                        }
+                    }
+                }
+                pstmt.executeBatch();
+                connection.commit();
             }
-            System.err.println(e.getMessage());
+            connection.setAutoCommit(true);
+        } catch (SQLException e) {
+            throw new RuntimeException("Error building SQLite index", e);
         }
     }
 
     @Override
     public List<Integer> search(String term) {
-        List<Integer> result = new ArrayList<>();
-        try (Connection conn = DriverManager.getConnection(DB_URL);
-             PreparedStatement pstmt = conn.prepareStatement(SELECT)) {
-            pstmt.setString(1, term.toLowerCase());
+        List<Integer> results = new ArrayList<>();
+        String sql = "SELECT book_id FROM inverted_index WHERE term = ?";
+        try (PreparedStatement pstmt = connection.prepareStatement(sql)) {
+            pstmt.setString(1, term);
             try (ResultSet rs = pstmt.executeQuery()) {
                 while (rs.next()) {
-                    result.add(rs.getInt("book_id"));
+                    results.add(rs.getInt("book_id"));
                 }
             }
         } catch (SQLException e) {
-            System.err.println(e.getMessage());
+            throw new RuntimeException("Error querying SQLite", e);
         }
-        return Collections.unmodifiableList(result);
-    }
-
-    private void initSchema(String url) {
-        try {
-            Files.createDirectories(Paths.get(DB_PATH).getParent());
-            try (Connection conn = DriverManager.getConnection(url);
-                 Statement stmt = conn.createStatement()) {
-                stmt.execute("PRAGMA synchronous = OFF");
-                stmt.execute("PRAGMA journal_mode = MEMORY");
-                stmt.execute("PRAGMA temp_store = MEMORY");
-                stmt.execute(DDL);
-            }
-        } catch (IOException | SQLException e) {
-            System.err.println(e.getMessage());
-        }
+        return results;
     }
 }

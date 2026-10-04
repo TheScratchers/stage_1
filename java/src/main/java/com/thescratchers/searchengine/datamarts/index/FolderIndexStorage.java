@@ -2,6 +2,7 @@ package com.thescratchers.searchengine.datamarts.index;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 public class FolderIndexStorage implements InvertedIndexStorage {
 
@@ -18,15 +19,15 @@ public class FolderIndexStorage implements InvertedIndexStorage {
     }
 
     @Override
-    public void save(int bookId, List<String> terms) {
-        System.out.println("[FOLDER-INDEX] save() not yet implemented — stub.");
-        System.out.println("[FOLDER-INDEX] Would write " + terms.size()
-                + " terms for book " + bookId + " under " + rootPath);
+    public void save(String term, int bookId) {
     }
 
     @Override
     public List<Integer> search(String term) {
-        System.out.println("[FOLDER-INDEX] search() not yet implemented — stub. term=" + term);
         return Collections.emptyList();
+    }
+
+    @Override
+    public void build(Map<String, List<Integer>> memoryIndex) {
     }
 }

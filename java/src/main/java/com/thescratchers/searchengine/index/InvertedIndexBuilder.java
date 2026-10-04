@@ -29,12 +29,9 @@ public class InvertedIndexBuilder {
         String content        = Files.readString(bodyPath);
         List<String> tokens   = TextTokenizer.tokenize(content);
         Set<String> uniqueTerms = new HashSet<>(tokens);
-        List<String> termList = new ArrayList<>(uniqueTerms);
-
-        storage.save(bookId, termList);
-
-        System.out.println("[INDEXER] Book " + bookId + ": "
-                + termList.size() + " unique terms indexed.");
+        for (String term : uniqueTerms) {
+            storage.save(term, bookId);
+        }
     }
 
     public List<Integer> search(String term) {

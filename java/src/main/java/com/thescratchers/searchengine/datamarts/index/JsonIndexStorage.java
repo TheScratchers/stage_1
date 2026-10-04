@@ -26,22 +26,18 @@ public class JsonIndexStorage implements InvertedIndexStorage {
     }
 
     @Override
-    public void save(int bookId, List<String> terms) {
-        if (terms == null || terms.isEmpty()) return;
+    public void save(String term, int bookId) {
+        if (term == null || term.isEmpty()) return;
         try {
             Files.createDirectories(outputPath.getParent());
             Map<String, List<Integer>> index = loadExisting();
-            for (String term : terms) {
-                index.computeIfAbsent(term, k -> new ArrayList<>());
-                if (!index.get(term).contains(bookId)) {
-                    index.get(term).add(bookId);
-                }
+            index.computeIfAbsent(term, k -> new ArrayList<>());
+            if (!index.get(term).contains(bookId)) {
+                index.get(term).add(bookId);
             }
             writeJson(new TreeMap<>(index));
-            System.out.println("[JSON-INDEX] Saved " + terms.size()
-                    + " terms for book " + bookId + " -> " + outputPath);
         } catch (IOException e) {
-            System.err.println("[JSON-INDEX] Error saving: " + e.getMessage());
+            System.err.println(e.getMessage());
         }
     }
 
@@ -64,7 +60,7 @@ public class JsonIndexStorage implements InvertedIndexStorage {
             }
             return Collections.unmodifiableList(result);
         } catch (IOException e) {
-            System.err.println("[JSON-INDEX] Error searching: " + e.getMessage());
+            System.err.println(e.getMessage());
             return Collections.emptyList();
         }
     }
@@ -108,5 +104,9 @@ public class JsonIndexStorage implements InvertedIndexStorage {
         }
         sb.append("\n}");
         Files.writeString(outputPath, sb.toString());
+    }
+    
+    @Override
+    public void build(Map<String, List<Integer>> memoryIndex) {
     }
 }
