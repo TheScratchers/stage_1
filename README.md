@@ -80,9 +80,9 @@ The inverted index maps each term to the list of book IDs where it appears:
 ```
 
 Three storage approaches are benchmarked:
-- **Single monolithic file** (JSON / binary)
-- **NoSQL database** (MongoDB)
-- **Custom / sharded approach**
+- **Single monolithic file** (JSON)
+- **Hierarchical folder structure** (sharded by letter)
+- **Relational database** (SQLite)
 
 ### 4. Control Layer
 

@@ -135,3 +135,14 @@ The compiled executable `search_engine` provides rich commands:
 # Run all benchmarks across scales
 ./build/search_engine bench-all 100,1000,10000
 ```
+
+### Benchmark Datamarts & PDF Report
+All empirical benchmark metrics are version-controlled in `c++/datamarts/`:
+- `c++/datamarts/benchmark_datalake_results.json`
+- `c++/datamarts/benchmark_metadata_results.json`
+- `c++/datamarts/benchmark_inverted_index_results.json`
+
+To regenerate the technical report PDF (`c++/stage_1_cpp_report.pdf` and `stage_1_cpp_report.pdf`):
+```bash
+python3 c++/generate_report.py
+```

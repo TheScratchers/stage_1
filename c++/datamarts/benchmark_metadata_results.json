@@ -1,0 +1,36 @@
+{
+  "results": [
+    {
+      "db_size_bytes": 28672,
+      "find_by_author_repeated_avg_ms": 0.23084334000000004,
+      "find_by_author_unique_avg_ms": 0.18810334,
+      "find_by_id_avg_ms": 0.22958958000000002,
+      "insert_books_per_sec": 11205.42342493767,
+      "insert_seconds": 0.00892425,
+      "n_books": 100
+    },
+    {
+      "db_size_bytes": 172032,
+      "find_by_author_repeated_avg_ms": 0.2781075,
+      "find_by_author_unique_avg_ms": 0.24232081999999996,
+      "find_by_id_avg_ms": 0.14574146,
+      "insert_books_per_sec": 260827.0617466336,
+      "insert_seconds": 0.003833958,
+      "n_books": 1000
+    },
+    {
+      "db_size_bytes": 1601536,
+      "find_by_author_repeated_avg_ms": 1.45445332,
+      "find_by_author_unique_avg_ms": 1.1006375,
+      "find_by_id_avg_ms": 0.140890625,
+      "insert_books_per_sec": 536940.3698724477,
+      "insert_seconds": 0.018624042,
+      "n_books": 10000
+    }
+  ],
+  "scales": [
+    100,
+    1000,
+    10000
+  ]
+}

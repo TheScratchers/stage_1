@@ -1,0 +1,108 @@
+{
+  "results_by_scale": {
+    "100": {
+      "hierarchical": {
+        "avg_lookup_ms": 0.1303833,
+        "build_seconds": 2.723577209,
+        "n_terms": 35007,
+        "num_dirs": 27,
+        "num_files": 35007,
+        "peak_memory_kb": 8416.0,
+        "structure": "hierarchical",
+        "total_size_bytes": 4895751,
+        "update_seconds": 0.000369083
+      },
+      "json_monolithic": {
+        "build_seconds": 0.05143875,
+        "cold_load_seconds": 0.093531291,
+        "in_memory_lookup_avg_ms": 0.00105,
+        "n_terms": 35007,
+        "peak_memory_kb": 48672.0,
+        "structure": "json_monolithic",
+        "total_size_bytes": 9080614,
+        "update_seconds": 0.13776495799999997
+      },
+      "sqlite_index": {
+        "avg_lookup_ms": 0.1181208,
+        "build_seconds": 0.742464792,
+        "n_terms": 35007,
+        "num_files": 1,
+        "peak_memory_kb": 10352.0,
+        "structure": "sqlite_index",
+        "total_size_bytes": 42082304,
+        "update_seconds": 0.0006795
+      }
+    },
+    "1000": {
+      "hierarchical": {
+        "avg_lookup_ms": 0.1001791,
+        "build_seconds": 2.93872725,
+        "n_terms": 35007,
+        "num_dirs": 27,
+        "num_files": 35007,
+        "peak_memory_kb": 40864.0,
+        "structure": "hierarchical",
+        "total_size_bytes": 48957321,
+        "update_seconds": 0.000690042
+      },
+      "json_monolithic": {
+        "build_seconds": 0.38852825,
+        "cold_load_seconds": 0.700676625,
+        "in_memory_lookup_avg_ms": 0.0017208,
+        "n_terms": 35007,
+        "peak_memory_kb": 341328.0,
+        "structure": "json_monolithic",
+        "total_size_bytes": 84614734,
+        "update_seconds": 1.038625416
+      },
+      "sqlite_index": {
+        "avg_lookup_ms": 0.7181708,
+        "build_seconds": 7.204412,
+        "n_terms": 35007,
+        "num_files": 1,
+        "peak_memory_kb": 43856.0,
+        "structure": "sqlite_index",
+        "total_size_bytes": 426545152,
+        "update_seconds": 0.000685416
+      }
+    },
+    "10000": {
+      "hierarchical": {
+        "avg_lookup_ms": 0.4580875,
+        "build_seconds": 6.437269458,
+        "n_terms": 35007,
+        "num_dirs": 27,
+        "num_files": 35007,
+        "peak_memory_kb": 352688.0,
+        "structure": "hierarchical",
+        "total_size_bytes": 489573021,
+        "update_seconds": 0.003942542
+      },
+      "json_monolithic": {
+        "build_seconds": 5.081471084,
+        "cold_load_seconds": 7.042453458,
+        "in_memory_lookup_avg_ms": 0.0063999999999999994,
+        "n_terms": 35007,
+        "peak_memory_kb": 1338688.0,
+        "structure": "json_monolithic",
+        "total_size_bytes": 839955934,
+        "update_seconds": 11.914671208
+      },
+      "sqlite_index": {
+        "avg_lookup_ms": 4.4430958,
+        "build_seconds": 80.208410375,
+        "n_terms": 35007,
+        "num_files": 1,
+        "peak_memory_kb": 355728.0,
+        "structure": "sqlite_index",
+        "total_size_bytes": 4430639104,
+        "update_seconds": 0.001983334
+      }
+    }
+  },
+  "scales": [
+    100,
+    1000,
+    10000
+  ]
+}
