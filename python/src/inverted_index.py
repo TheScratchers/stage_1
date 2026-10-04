@@ -17,7 +17,7 @@ at startup, then every lookup is a plain dict access), but the whole
 file has to be parsed before the very first query can be answered, and
 that parsing cost grows with the size of the index. See
 benchmark_inverted_index.py for a concrete comparison against the
-hierarchical and MongoDB structures.
+hierarchical and SQLite structures.
 """
 
 import json
@@ -47,7 +47,12 @@ def build_index(datalake_dir: str) -> dict:
     # automatically creates an empty set for it, so we can just call
     # .add() without checking "does this term already have an entry?".
     index = defaultdict(set)
-    for body_file in sorted(Path(datalake_dir).rglob("*.body.txt")):
+    # sorted() already returns a list, so wrapping it in a variable
+    # here doesn't change what's iterated or in what order - it just
+    # lets us also report "X/N books processed" below. Purely
+    # additive: nothing about how `index` is built changes.
+    body_files = sorted(Path(datalake_dir).rglob("*.body.txt"))
+    for i, body_file in enumerate(body_files):
         # The book_id is the part of the filename before the first
         # "." (e.g. "1342.body.txt" -> "1342" -> 1342).
         book_id = int(body_file.name.split(".")[0])
@@ -57,6 +62,12 @@ def build_index(datalake_dir: str) -> dict:
         # not how many times.
         for term in set(tokenize(text)):
             index[term].add(book_id)
+        # Heartbeat for large scales: this loop alone can run for
+        # minutes with no other output, which looks indistinguishable
+        # from a hang. Every 200 books is frequent enough to reassure
+        # without flooding the console.
+        if (i + 1) % 200 == 0:
+            print(f"    ...processed {i + 1}/{len(body_files)} books")
     # Convert the internal {term: set(book_ids)} into the final
     # {term: [sorted book_ids]} shape used for storage/output.
     return {term: sorted(ids) for term, ids in index.items()}

@@ -5,6 +5,7 @@
 # ─── Datalake & Data directories (large runtime data) ───────
 data/datalake/
 data/datamarts/
+data/bench/
 data/bench_*/
 !data/sample_books/
 !data/sample_books/*

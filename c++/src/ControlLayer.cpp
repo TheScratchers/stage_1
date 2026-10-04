@@ -1,237 +1,156 @@
 #include "ControlLayer.hpp"
 #include <iostream>
 #include <fstream>
-#include <sstream>
 #include <random>
-#include <algorithm>
 #include <chrono>
-#include <iomanip>
 #include <curl/curl.h>
 
 namespace fs = std::filesystem;
 
-// libcurl write callback to accumulate response into std::string.
-static size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
-    size_t totalSize = size * nmemb;
-    std::string* s = static_cast<std::string*>(userp);
-    s->append(static_cast<char*>(contents), totalSize);
-    return totalSize;
+static size_t curlWrite(void* ptr, size_t sz, size_t nm, void* stream) {
+    static_cast<std::string*>(stream)->append(static_cast<char*>(ptr), sz * nm);
+    return sz * nm;
 }
 
-void ControlLayer::resolvePaths(const std::string& controlDir, const std::string& datalakeDir, const std::string& datamartDir) {
-    if (!controlDir.empty() && !datalakeDir.empty() && !datamartDir.empty()) {
-        controlPath = fs::absolute(controlDir);
-        datalakePath = fs::absolute(datalakeDir);
-        datamartPath = fs::absolute(datamartDir);
+void ControlLayer::resolvePaths(const std::string& cDir, const std::string& lDir, const std::string& mDir) {
+    if (!cDir.empty() && !lDir.empty() && !mDir.empty()) {
+        controlPath = fs::absolute(cDir);
+        datalakePath = fs::absolute(lDir);
+        datamartPath = fs::absolute(mDir);
     } else {
-        // Automatically find project root by searching upwards for key landmark files
         fs::path root = fs::current_path();
-        while (root.has_parent_path() && 
-               !fs::exists(root / "stage_1_building_data_layer.pdf") && 
-               !fs::exists(root / ".git")) {
+        while (root.has_parent_path() && !fs::exists(root / "stage_1_building_data_layer.pdf") && !fs::exists(root / ".git")) {
             root = root.parent_path();
         }
-
-        controlPath = controlDir.empty() ? (root / "control") : fs::absolute(controlDir);
-        datalakePath = datalakeDir.empty() ? (root / "data" / "datalake") : fs::absolute(datalakeDir);
-        datamartPath = datamartDir.empty() ? (root / "data" / "datamarts") : fs::absolute(datamartDir);
+        controlPath = cDir.empty() ? (root / "control") : fs::absolute(cDir);
+        datalakePath = lDir.empty() ? (root / "data" / "datalake") : fs::absolute(lDir);
+        datamartPath = mDir.empty() ? (root / "data" / "datamarts") : fs::absolute(mDir);
     }
-
     downloadedFile = controlPath / "downloaded_books.txt";
     indexedFile = controlPath / "indexed_books.txt";
-
     std::error_code ec;
     fs::create_directories(controlPath, ec);
     fs::create_directories(datalakePath, ec);
     fs::create_directories(datamartPath, ec);
 }
 
-ControlLayer::ControlLayer(const std::string& controlDir,
-                           const std::string& datalakeDir,
-                           const std::string& datamartDir) {
-    resolvePaths(controlDir, datalakeDir, datamartDir);
+ControlLayer::ControlLayer(const std::string& c, const std::string& l, const std::string& m) {
+    resolvePaths(c, l, m);
+    // Ensure all existing indexed books are synchronized across all datamarts
+    if (fs::exists(indexedFile) && (!fs::exists(datamartPath / "inverted_index.db") || !fs::exists(datamartPath / "inverted_index.json"))) {
+        syncDatamarts();
+    }
 }
 
-std::unordered_set<int> ControlLayer::readIds(const fs::path& filePath) {
-    std::unordered_set<int> ids;
-    std::ifstream file(filePath);
-    if (!file.is_open()) return ids;
-
-    std::string line;
-    while (std::getline(file, line)) {
-        if (!line.empty()) {
-            try {
-                ids.insert(std::stoi(line));
-            } catch (...) {}
-        }
+void ControlLayer::syncDatamarts() {
+    auto idx = readIds(indexedFile);
+    for (int id : idx) {
+        indexBook(id);
     }
+}
+
+std::unordered_set<int> ControlLayer::readIds(const fs::path& p) {
+    std::unordered_set<int> ids;
+    std::ifstream f(p);
+    int id;
+    while (f >> id) ids.insert(id);
     return ids;
 }
 
-void ControlLayer::appendId(const fs::path& filePath, int bookId) {
-    std::ofstream file(filePath, std::ios::app);
-    if (file.is_open()) {
-        file << bookId << "\n";
-    }
+void ControlLayer::appendId(const fs::path& p, int id) {
+    std::ofstream f(p, std::ios::app);
+    if (f.is_open()) f << id << "\n";
 }
 
-bool ControlLayer::downloadBook(int bookId) {
-    std::string url = "https://www.gutenberg.org/cache/epub/" + std::to_string(bookId) + "/pg" + std::to_string(bookId) + ".txt";
-
+bool ControlLayer::downloadBook(int id) {
+    std::string url = "https://www.gutenberg.org/cache/epub/" + std::to_string(id) + "/pg" + std::to_string(id) + ".txt";
     CURL* curl = curl_easy_init();
-    if (!curl) {
-        std::cerr << "[downloadBook] Failed to initialize CURL\n";
-        return false;
-    }
+    if (!curl) return false;
 
-    std::string responseData;
+    std::string resp;
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseData);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWrite);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 25L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "BigData-SearchEngine/1.0");
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 20L);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "BigData-Stage1/1.0");
 
+    long code = 0;
     CURLcode res = curl_easy_perform(curl);
-    long httpCode = 0;
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code);
     curl_easy_cleanup(curl);
 
-    if (res != CURLE_OK || httpCode != 200) {
-        std::cerr << "[downloadBook] Book " << bookId << " unavailable (HTTP " << httpCode << ")\n";
-        return false;
-    }
+    if (res != CURLE_OK || code != 200) return false;
+    size_t s = resp.find("*** START OF THE PROJECT GUTENBERG");
+    size_t e = resp.find("*** END OF THE PROJECT GUTENBERG");
+    if (s == std::string::npos || e == std::string::npos || e <= s) return false;
 
-    std::string startMarker = "*** START OF THE PROJECT GUTENBERG EBOOK";
-    std::string endMarker = "*** END OF THE PROJECT GUTENBERG EBOOK";
-
-    size_t startPos = responseData.find(startMarker);
-    size_t endPos = responseData.find(endMarker);
-
-    if (startPos == std::string::npos || endPos == std::string::npos || endPos <= startPos) {
-        std::cerr << "[downloadBook] Gutenberg markers missing for book " << bookId << "\n";
-        return false;
-    }
-
-    std::string header = responseData.substr(0, startPos);
-    size_t bodyStart = responseData.find('\n', startPos);
-    if (bodyStart == std::string::npos || bodyStart >= endPos) {
-        bodyStart = startPos + startMarker.length();
-    } else {
-        bodyStart += 1;
-    }
-    std::string body = responseData.substr(bodyStart, endPos - bodyStart);
-
-    return Datalake::saveBook(datalakePath, DatalakeLayout::TimeBased, bookId, header, body);
+    std::string header = resp.substr(0, s);
+    size_t bodyStart = resp.find('\n', s);
+    std::string body = resp.substr(bodyStart == std::string::npos ? s : bodyStart + 1, e - bodyStart - 1);
+    return Datalake::saveBook(datalakePath, DatalakeLayout::TimeBased, id, header, body);
 }
 
-bool ControlLayer::ingestSampleBook(int bookId, const std::string& header, const std::string& body) {
-    bool saved = Datalake::saveBook(datalakePath, DatalakeLayout::TimeBased, bookId, header, body);
-    if (saved) {
-        appendId(downloadedFile, bookId);
+bool ControlLayer::ingestSampleBook(int id, const std::string& h, const std::string& b) {
+    if (Datalake::saveBook(datalakePath, DatalakeLayout::TimeBased, id, h, b)) {
+        appendId(downloadedFile, id);
+        return true;
     }
-    return saved;
+    return false;
 }
 
-bool ControlLayer::indexBook(int bookId) {
-    BookFiles files = Datalake::findBookRecursive(datalakePath, bookId);
-    if (!files.exists) {
-        std::cerr << "[CONTROL] Could not locate files for book " << bookId << " in datalake.\n";
-        return false;
-    }
+bool ControlLayer::indexBook(int id) {
+    BookFiles files = Datalake::findBookRecursive(datalakePath, id);
+    if (!files.exists) return false;
 
-    // 1. Read header and body
-    std::ifstream hStream(files.headerPath, std::ios::binary);
-    std::string headerText((std::istreambuf_iterator<char>(hStream)), std::istreambuf_iterator<char>());
+    std::ifstream hs(files.headerPath, std::ios::binary);
+    std::string hText((std::istreambuf_iterator<char>(hs)), std::istreambuf_iterator<char>());
+    std::ifstream bs(files.bodyPath, std::ios::binary);
+    std::string bText((std::istreambuf_iterator<char>(bs)), std::istreambuf_iterator<char>());
 
-    std::ifstream bStream(files.bodyPath, std::ios::binary);
-    std::string bodyText((std::istreambuf_iterator<char>(bStream)), std::istreambuf_iterator<char>());
-
-    // 2. Parse metadata
-    BookMetadata meta = MetadataExtractor::parseHeader(bookId, headerText);
+    BookMetadata meta = MetadataExtractor::parseHeader(id, hText);
     meta.headerPath = files.headerPath.string();
     meta.bodyPath = files.bodyPath.string();
+    meta.ingestedAt = std::to_string(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
 
-    auto now = std::chrono::system_clock::now();
-    std::time_t now_c = std::chrono::system_clock::to_time_t(now);
-    std::tm tmStruct{};
-#if defined(_WIN32) || defined(_WIN64)
-    localtime_s(&tmStruct, &now_c);
-#else
-    localtime_r(&now_c, &tmStruct);
-#endif
-    std::ostringstream timeStream;
-    timeStream << std::put_time(&tmStruct, "%Y-%m-%d %H:%M:%S");
-    meta.ingestedAt = timeStream.str();
+    MetadataExtractor::saveToDatabase(meta, (datamartPath / "metadata.db").string());
+    JsonIndex::update(id, bText, (datamartPath / "inverted_index.json").string());
+    HierarchicalIndex::update(id, bText, (datamartPath / "inverted_index_hier").string());
+    SqliteIndex::update(id, bText, (datamartPath / "inverted_index.db").string());
 
-    // 3. Save metadata into SQLite database and CSV
-    fs::path dbPath = datamartPath / "metadata.db";
-    fs::path csvPath = datamartPath / "metadata.csv";
-    MetadataExtractor::saveToDatabase(meta, dbPath.string());
-    MetadataExtractor::saveToCsv(meta, csvPath.string());
-
-    // 4. Update the 3 Inverted Index structures
-    fs::path jsonPath = datamartPath / "inverted_index.json";
-    fs::path hierDir  = datamartPath / "inverted_index_hier";
-    fs::path binPath  = datamartPath / "inverted_index.bin";
-
-    InvertedIndex::updateMonolithicIndex(bookId, bodyText, jsonPath.string());
-    InvertedIndex::updateHierarchicalIndex(bookId, bodyText, hierDir.string());
-    InvertedIndex::updateBinaryIndex(bookId, bodyText, binPath.string());
-
-    std::cout << "[INDEXER] Successfully indexed book " << bookId 
-              << " (\"" << meta.title << "\" by " << meta.author << ") across all datamarts.\n";
+    std::cout << "[INDEXER] Indexed book " << id << " (\"" << meta.title << "\" by " << meta.author << ")\n";
     return true;
 }
 
 bool ControlLayer::step() {
-    auto downloaded = readIds(downloadedFile);
-    auto indexed = readIds(indexedFile);
-
-    std::vector<int> readyToIndex;
-    for (int id : downloaded) {
-        if (indexed.find(id) == indexed.end()) {
-            readyToIndex.push_back(id);
-        }
-    }
-
-    if (!readyToIndex.empty()) {
-        std::sort(readyToIndex.begin(), readyToIndex.end());
-        int bookId = readyToIndex.front();
-        std::cout << "[CONTROL] Scheduling book " << bookId << " for indexing...\n";
-        if (indexBook(bookId)) {
-            appendId(indexedFile, bookId);
-            std::cout << "[CONTROL] Book " << bookId << " marked as indexed.\n";
-            return true;
-        } else {
-            std::cerr << "[CONTROL] Indexing failed for book " << bookId << ".\n";
+    auto dl = readIds(downloadedFile), idx = readIds(indexedFile);
+    for (int id : dl) {
+        if (idx.find(id) == idx.end()) {
+            std::cout << "[CONTROL] Scheduling book " << id << " for indexing...\n";
+            if (indexBook(id)) {
+                appendId(indexedFile, id);
+                std::cout << "[CONTROL] Book " << id << " indexed.\n";
+                return true;
+            }
             return false;
         }
-    } else {
-        // Pick random Gutenberg candidate not yet downloaded
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        std::uniform_int_distribution<> distrib(1, 70000);
-
-        for (int attempt = 0; attempt < 10; ++attempt) {
-            int candidateId = distrib(gen);
-            if (downloaded.find(candidateId) == downloaded.end()) {
-                std::cout << "[CONTROL] Attempting to download book ID " << candidateId << "...\n";
-                if (downloadBook(candidateId)) {
-                    appendId(downloadedFile, candidateId);
-                    std::cout << "[CONTROL] Book " << candidateId << " downloaded into Datalake.\n";
-                    return true;
-                }
-            }
-        }
-        std::cerr << "[CONTROL] No new book downloaded after retry attempts.\n";
-        return false;
     }
+    std::mt19937 gen(std::random_device{}());
+    std::uniform_int_distribution<> dist(1, 60000);
+    for (int i = 0; i < 10; ++i) {
+        int id = dist(gen);
+        if (dl.find(id) == dl.end() && downloadBook(id)) {
+            appendId(downloadedFile, id);
+            std::cout << "[CONTROL] Book " << id << " downloaded.\n";
+            return true;
+        }
+    }
+    return false;
 }
 
 void ControlLayer::run(int steps) {
     for (int i = 0; i < steps; ++i) {
-        std::cout << "\n--- Pipeline Step " << (i + 1) << " / " << steps << " ---\n";
+        std::cout << "--- Pipeline Step " << (i + 1) << " / " << steps << " ---\n";
         step();
     }
 }

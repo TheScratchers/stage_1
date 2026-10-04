@@ -6,14 +6,20 @@ This document details the pipeline architecture, codebase structure, and executi
 
 ## 1. Codebase Structure
 
-The C++ module is organized as follows:
+The C++ module is organized into focused, single-responsibility modules:
 
-*   **`CMakeLists.txt` / `Makefile`:** Build configuration enforcing C++17, `-O2` optimization, linking `libcurl` and `sqlite3`.
-*   **`include/Datalake.hpp` / `src/Datalake.cpp`:** Implements 3 partitioning strategies (Time-based, Book-based, and Batch-based) and the Datalake benchmark runner.
-*   **`include/MetadataExtractor.hpp` / `src/MetadataExtractor.cpp`:** Parses Gutenberg header fields (`Title`, `Author`, `Language`) and stores them in SQLite (`metadata.db`) and CSV (`metadata.csv`), with queries by author, title, and ID.
-*   **`include/InvertedIndex.hpp` / `src/InvertedIndex.cpp`:** Tokenizes cleaned text and manages 3 inverted index structures (Monolithic JSON, Hierarchical Folders, and Custom Binary Compact Index `BIDX`), plus Boolean search (AND / OR) and benchmarking.
-*   **`include/ControlLayer.hpp` / `src/ControlLayer.cpp`:** Orchestrator managing pipeline state (`downloaded_books.txt`, `indexed_books.txt`), automated path resolution, Gutenberg fetching, and multi-datamart updates.
-*   **`src/main.cpp`:** Application entry point and CLI suite supporting pipeline execution, querying, and benchmarking.
+*   **`CMakeLists.txt` / `Makefile`:** Build configuration enforcing C++17, `-O2` optimization, linking `libcurl` and `sqlite3`, building `search_engine` and `run_tests` executables.
+*   **`include/ControlLayer.hpp` / `src/ControlLayer.cpp`:** Orchestrator managing pipeline state (`downloaded_books.txt`, `indexed_books.txt`), automated path resolution, Gutenberg fetching via `libcurl`, and multi-datamart updates.
+*   **`include/Datalake.hpp` / `src/Datalake.cpp`:** Implements 3 partitioning strategies (Time-based, Book-based, and Batch-based), single-pass incremental detection (`detectNewBooks`), and idempotent recovery (`recoverDatalake`).
+*   **`include/MetadataExtractor.hpp` / `src/MetadataExtractor.cpp`:** Parses Gutenberg header fields (`Title`, `Author`, `Language`) with `std::regex` and stores them in SQLite (`metadata.db`) using prepared statements and transactions.
+*   **`include/Tokenizer.hpp` / `src/Tokenizer.cpp`:** Extracts cleaned, lowercase unique tokens using ASCII `[A-Za-z]+` per shared contract.
+*   **`include/JsonIndex.hpp` / `src/JsonIndex.cpp`:** Monolithic JSON inverted index using `nlohmann::json`.
+*   **`include/HierarchicalIndex.hpp` / `src/HierarchicalIndex.cpp`:** Partitioned directory-based inverted index (`A-Z/_`).
+*   **`include/SqliteIndex.hpp` / `src/SqliteIndex.cpp`:** High-performance relational inverted index (`inverted_index(term, book_id)`) with transactional writes and B-Tree index scans.
+*   **`include/QueryEngine.hpp` / `src/QueryEngine.cpp`:** Unified query engine for single-term and Boolean AND/OR queries.
+*   **`include/BenchmarkRunner.hpp` / `src/BenchmarkRunner.cpp`:** Multi-scale benchmarking suite for Datalake (write, lookup, incremental, recovery), Inverted Index (build, query, update, RAM, disk), and Metadata.
+*   **`src/main.cpp`:** Unified CLI application entry point.
+*   **`tests/`:** Automated test suite with 16 test suites covering all units.
 
 ---
 
@@ -56,4 +62,4 @@ The system operates as a **Task Queue** orchestrated by `ControlLayer::step()`. 
   `book_id (PK), title, author, language, header_path, body_path, ingested_at`
 - **Monolithic JSON Index:** `data/datamarts/inverted_index.json`
 - **Hierarchical Index:** `data/datamarts/inverted_index_hier/<Letter>/<term>.txt`
-- **Binary Compact Index:** `data/datamarts/inverted_index.bin` (`BIDX` magic, term dictionary table with disk offsets, direct random seek postings lookup).
+- **SQLite Relational Index:** `data/datamarts/inverted_index.db` (`inverted_index` table with `PRIMARY KEY (term, book_id)`).
