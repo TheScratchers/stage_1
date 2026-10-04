@@ -17,6 +17,11 @@ import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.Warmup;
+import org.openjdk.jmh.profile.GCProfiler;
+import org.openjdk.jmh.runner.Runner;
+import org.openjdk.jmh.runner.RunnerException;
+import org.openjdk.jmh.runner.options.Options;
+import org.openjdk.jmh.runner.options.OptionsBuilder;
 
 import java.io.File;
 import java.io.IOException;
@@ -160,5 +165,13 @@ public class BenchmarkRunner {
             result.add(trimmed);
         }
         return result;
+    }
+
+    public static void main(String[] args) throws RunnerException {
+        Options options = new OptionsBuilder()
+                .include(BenchmarkRunner.class.getSimpleName())
+                .addProfiler(GCProfiler.class)
+                .build();
+        new Runner(options).run();
     }
 }
