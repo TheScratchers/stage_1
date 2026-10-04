@@ -248,7 +248,7 @@ def benchmark_structure(name: str, path_fn, book_ids, content_by_real_id):
         "avg_files_per_dir": round(avg_files_per_dir, 1),
         "max_files_per_dir": max_files_per_dir,
         "incremental_candidates": len(incremental_candidates),
-        "incremental_new_found": len(new_ids),
+        "incremental_new_found": len(new_entries),
         "incremental_detect_seconds": round(incremental_detect_elapsed, 4),
         "incremental_write_seconds": round(incremental_write_elapsed, 4),
         "recovery_resumed_count": resumed_count,

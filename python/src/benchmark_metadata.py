@@ -107,7 +107,10 @@ def benchmark_scale(n_books: int, meta_by_real_id: dict):
     # 1. Insertion speed
     t0 = time.perf_counter()
     for i, book_id in enumerate(book_ids):
-        real_id = REAL_BOOK_IDS[book_id % len(REAL_BOOK_IDS)]
+        # Cross-language contract rule (../shared/CONTRACT.md Section 4.1):
+        # the i-th row (0-indexed POSITION, not its numeric book_id)
+        # replicates the metadata of the real book at REAL_BOOK_IDS[i % 20].
+        real_id = REAL_BOOK_IDS[i % len(REAL_BOOK_IDS)]
         meta = meta_by_real_id[real_id]
         md.upsert_book(
             db_path,
